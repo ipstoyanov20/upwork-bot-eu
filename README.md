@@ -26,11 +26,6 @@ Firebase Realtime Database integration
 
 After the scraper finishes it can automatically upload `eu_proposals_extracted.json` to Firebase Realtime Database.
 
-Local JSON export report (summary / budget tables / annexes / downloads)
-
-If you have a Firebase RTDB export JSON in the project root named:
-
-- `upworkbot-790d5-default-rtdb-export (1).json`
 
 You can view a generated report in the Next.js app:
 
