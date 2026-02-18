@@ -8,6 +8,7 @@
 const puppeteer = require("puppeteer");
 const path = require("path");
 const fs = require("fs");
+const { uploadJsonFileToRTDB } = require("./firebaseClient");
 
 // ============================================================================
 // UTILITY FUNCTIONS
@@ -19,6 +20,15 @@ function cleanText(text) {
 		.trim()
 		.replace(/\s+/g, " ")
 		.replace(/\n\s*\n/g, "\n");
+}
+
+function sanitizeFirebaseKey(key) {
+	if (!key) return 'unknown';
+	return key
+		.replace(/[.#$/\[\]]/g, '_')
+		.replace(/_+/g, '_')
+		.replace(/^_|_$/g, '')
+		.trim() || 'unknown';
 }
 
 function preserveListFormatting(html) {
@@ -347,40 +357,98 @@ async function discoverProposals(page, keyword) {
 
 	await new Promise((r) => setTimeout(r, 2000));
 
-	console.log("📊 Extracting proposal URLs from results...");
-	const results = await page.$$eval(
-		"div.eui-card-header__container",
-		(containers) =>
-			containers.map((container) => {
-				const linkEl = container.querySelector(
-					"a.eui-u-text-link",
-				);
-				const topicCodeEl = container.querySelector(
-					"sedia-result-card-type span.ng-star-inserted",
-				);
-				const strongTags = container.querySelectorAll(
-					"strong.ng-star-inserted",
-				);
+	console.log("📊 Extracting total items count...");
+	let totalItemsFound = 0;
+	try {
+		await page.waitForSelector('strong', { timeout: 5000 });
+		totalItemsFound = await page.evaluate(() => {
+			const containers = document.querySelectorAll('div[class*="col-sm"], div[class*="col-lg"], div[class*="col-xl"]');
+			for (const container of containers) {
+				if (container.textContent.includes('item(s) found')) {
+					const strong = container.querySelector('strong');
+					if (strong) {
+						return parseInt(strong.textContent.trim(), 10) || 0;
+					}
+				}
+			}
+			return 0;
+		});
+		console.log(`✅ Total items found: ${totalItemsFound}`);
+	} catch (e) {
+		console.log("⚠️ Could not extract total items count");
+	}
 
-				return {
-					title: linkEl
-						? linkEl.textContent.trim()
-						: "N/A",
-					href: linkEl ? linkEl.href : "N/A",
-					topicCode: topicCodeEl
-						? topicCodeEl.textContent.trim()
-						: "N/A",
-					openingDate: strongTags[0]
-						? strongTags[0].textContent.trim()
-						: "N/A",
-					deadlineDate: strongTags[1]
-						? strongTags[1].textContent.trim()
-						: "N/A",
-				};
-			}),
-	);
+	console.log("📜 Scrolling to bottom of page...");
+	await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+	await new Promise((r) => setTimeout(r, 1000));
 
-	console.log(`\n✅ Found ${results.length} proposals`);
+	console.log("🔢 Changing pagination size to 100...");
+	try {
+		await page.waitForSelector('select.page-size__select', { timeout: 5000 });
+		await page.select('select.page-size__select', '100');
+		await page.evaluate(() => {
+			const select = document.querySelector('select.page-size__select');
+			if (select) {
+				select.dispatchEvent(new Event('change', { bubbles: true }));
+			}
+		});
+		console.log("✅ Page size set to 100");
+		await new Promise((r) => setTimeout(r, 3000));
+	} catch (e) {
+		console.log("⚠️ Could not change pagination size, continuing with default");
+	}
+
+	const allResults = [];
+
+	const extractCurrentPageResults = async () => {
+		return await page.$$eval(
+			"div.eui-card-header__container",
+			(containers) =>
+				containers.map((container) => {
+					const linkEl = container.querySelector("a.eui-u-text-link");
+					const topicCodeEl = container.querySelector("sedia-result-card-type span.ng-star-inserted");
+					const strongTags = container.querySelectorAll("strong.ng-star-inserted");
+					return {
+						title: linkEl ? linkEl.textContent.trim() : "N/A",
+						href: linkEl ? linkEl.href : "N/A",
+						topicCode: topicCodeEl ? topicCodeEl.textContent.trim() : "N/A",
+						openingDate: strongTags[0] ? strongTags[0].textContent.trim() : "N/A",
+						deadlineDate: strongTags[1] ? strongTags[1].textContent.trim() : "N/A",
+					};
+				}),
+		);
+	};
+
+	console.log("📄 Checking for pagination...");
+	const paginationButtons = await page.$$('div.eui-paginator__page-navigation-numbers button');
+	const totalPages = paginationButtons.length;
+	console.log(`✅ Found ${totalPages > 0 ? totalPages : 1} page(s)`);
+
+	if (totalPages > 1) {
+		for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+			console.log(`\n📖 Processing page ${pageNum} of ${totalPages}...`);
+
+			if (pageNum > 1) {
+				const pageButtons = await page.$$('div.eui-paginator__page-navigation-numbers button');
+				const targetButton = pageButtons[pageNum - 1];
+				if (targetButton) {
+					await targetButton.click();
+					await new Promise((r) => setTimeout(r, 3000));
+				}
+			}
+
+			const pageResults = await extractCurrentPageResults();
+			allResults.push(...pageResults);
+			console.log(`✅ Extracted ${pageResults.length} results from page ${pageNum}`);
+		}
+	} else {
+		const pageResults = await extractCurrentPageResults();
+		allResults.push(...pageResults);
+	}
+
+	const results = allResults;
+
+	console.log(`\n✅ Found ${results.length} proposals (Total reported: ${totalItemsFound})`);
 	results.forEach((result, index) => {
 		console.log(`\n📋 Result ${index + 1}:`);
 		console.log(`   Title: ${result.title}`);
@@ -390,7 +458,6 @@ async function discoverProposals(page, keyword) {
 		console.log(`   URL: ${result.href}`);
 	});
 
-	// Save to JSON
 	const discoveryFile = path.join(
 		__dirname,
 		"proposal_discovery_results.json",
@@ -403,6 +470,25 @@ async function discoverProposals(page, keyword) {
 	console.log(
 		`\n💾 Discovery results saved to: proposal_discovery_results.json`,
 	);
+
+	try {
+		if (process.env.FIREBASE_DATABASE_URL || process.env.FIREBASE_SERVICE_ACCOUNT_PATH || process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+			console.log('⬆️ Uploading discovery results to Firebase...');
+			const { initFirebase } = require('./firebaseClient');
+			const admin = initFirebase();
+			const db = admin.database();
+			const titles = results.map(r => r.title).filter(t => t && t !== 'N/A');
+			const ref = db.ref('/eu_discovery_results').push();
+			await ref.set({
+				createdAt: new Date().toISOString(),
+				titles,
+				data: results,
+			});
+			console.log(`✅ Discovery results uploaded to Firebase at /eu_discovery_results/${ref.key}`);
+		}
+	} catch (e) {
+		console.warn('⚠️ Firebase discovery upload failed:', e.message || e);
+	}
 
 	// Extract just the URLs for processing
 	const urls = results
@@ -741,7 +827,8 @@ async function extractSummaryInformation(page) {
 					if (dd) {
 						const value = dd.textContent.trim();
 						if (value && value.length < 200) {
-							keyInfo[text] = value;
+							const sanitizedKey = text.replace(/[.#$/\[\]]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '').trim() || 'unknown';
+							keyInfo[sanitizedKey] = value;
 						}
 					}
 				}
@@ -971,6 +1058,16 @@ async function extractProposalData(page, url) {
 		);
 
 		console.log(`\n✅ Results saved to: eu_proposals_extracted.json`);
+
+		// Try to upload results to Firebase Realtime Database if configured
+		try {
+			if (process.env.FIREBASE_DATABASE_URL || process.env.FIREBASE_SERVICE_ACCOUNT_PATH || process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+				console.log('⬆️ Uploading results to Firebase Realtime Database...');
+				await uploadJsonFileToRTDB(outputFile, '/eu_proposals');
+			}
+		} catch (e) {
+			console.warn('⚠️ Firebase upload failed:', e.message || e);
+		}
 
 		// SUMMARY
 		console.log(`\n${"=".repeat(70)}`);

@@ -21,3 +21,5 @@ yarn.lock
 # Output files
 /answers/
 *.json
+!web/**/*.json
+!web/package-lock.json
