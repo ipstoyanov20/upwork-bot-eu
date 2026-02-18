@@ -23,3 +23,5 @@ yarn.lock
 *.json
 !web/**/*.json
 !web/package-lock.json
+
+!upworkbot-790d5-default-rtdb-export (1).json
