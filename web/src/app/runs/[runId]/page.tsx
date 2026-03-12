@@ -33,7 +33,7 @@ type ProposalSummary = {
 
 type LinkRow = {
   proposalUrl: string;
-  kind: "annex" | "download";
+  kind: "annex" | "document";
   title: string;
   url: string;
   type?: string;
@@ -62,55 +62,65 @@ type LocalReport = {
   proposals: ProposalSummary[];
   budgets: { rows: BudgetRow[] };
   annexes: { rows: LinkRow[] };
-  downloads: { rows: LinkRow[] };
+  documents: { rows: LinkRow[] };
 };
 
-function formatCreatedAt(createdAt?: string) {
+function formatCreatedAt(createdAt?: string)
+{
   if (!createdAt) return "Unknown time";
   const d = new Date(createdAt);
   if (Number.isNaN(d.getTime())) return createdAt;
   return d.toLocaleString();
 }
 
-function isRecord(v: unknown): v is Record<string, unknown> {
+function isRecord(v: unknown): v is Record<string, unknown>
+{
   return !!v && typeof v === "object" && !Array.isArray(v);
 }
 
-function asString(v: unknown): string | undefined {
+function asString(v: unknown): string | undefined
+{
   return typeof v === "string" ? v : undefined;
 }
 
-function formatEUR(n: number | undefined) {
+function formatEUR(n: number | undefined)
+{
   if (!n) return "0";
   return n.toLocaleString(undefined, { maximumFractionDigits: 0 });
 }
 
-function parseDateMaybe(v?: string): number | null {
+function parseDateMaybe(v?: string): number | null
+{
   if (!v) return null;
   const t = Date.parse(v);
   return Number.isFinite(t) ? t : null;
 }
 
-function topicIdFromUrl(u?: string): string | null {
+function topicIdFromUrl(u?: string): string | null
+{
   if (!u) return null;
-  try {
+  try
+  {
     const url = new URL(u);
     const parts = url.pathname.split("/").filter(Boolean);
     const idx = parts.findIndex((p) => p === "topic-details");
     const next = idx >= 0 ? parts[idx + 1] : undefined;
     return next || null;
-  } catch {
+  } catch
+  {
     return null;
   }
 }
 
-function errorMessage(e: unknown): string {
+function errorMessage(e: unknown): string
+{
   if (e instanceof Error) return e.message;
   if (isRecord(e) && typeof e.message === "string") return e.message;
   return String(e);
 }
 
-function SafeExternalLink({ href, children }: { href: string; children: React.ReactNode }) {
+function SafeExternalLink({ href, children }: { href: string; children: React.ReactNode })
+{
   return (
     <a href={href} target="_blank" rel="noreferrer noopener" className="underline decoration-black/20 underline-offset-2 hover:decoration-black/50 text-black">
       {children}
@@ -131,15 +141,20 @@ function OpportunityCard({
   exportInfo,
   budgetRows,
   annexes,
-  downloads,
+  documents,
+  runId,
+  isLocalLoading,
 }: {
   opportunity: Opportunity;
   index: number;
   exportInfo?: OpportunityExportInfo;
   budgetRows?: BudgetRow[];
   annexes?: LinkRow[];
-  downloads?: LinkRow[];
-}) {
+  documents?: LinkRow[];
+  runId?: string;
+  isLocalLoading?: boolean;
+})
+{
   const title = asString(opportunity.title);
   const topicCode = asString(opportunity.topicCode);
   const href = asString(opportunity.href);
@@ -193,63 +208,99 @@ function OpportunityCard({
         </div>
       </div>
 
-      {exportInfo ? (
+      {isLocalLoading ? (
+        <div className="mt-4 grid grid-cols-2 gap-4">
+          <div className="h-20 animate-pulse rounded-xl border border-black/5 bg-black/5" />
+          <div className="h-20 animate-pulse rounded-xl border border-black/5 bg-black/5" />
+        </div>
+      ) : exportInfo ? (
         <div className="mt-4 grid grid-cols-2 gap-4 text-xs text-black">
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3">
-            <div className="font-semibold tracking-tight">Budget from proposals</div>
-            <div className="mt-1">
-              Rows: <span className="font-mono">{exportInfo.budgetRows}</span>
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 shadow-inner">
+            <div className="font-semibold tracking-tight text-black flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full bg-emerald-500"></span>
+              Budget Overview
             </div>
-            <div className="mt-1">
-              Total (EUR): <span className="font-mono">{formatEUR(exportInfo.totalBudgetEUR)}</span>
+            <div className="mt-2 flex justify-between">
+              <span className="text-black/60">Total Budget:</span>
+              <span className="font-bold underline decoration-emerald-500/30 underline-offset-2 decoration-2">{formatEUR(exportInfo.totalBudgetEUR)} EUR</span>
+            </div>
+            <div className="mt-1 flex justify-between">
+              <span className="text-black/60">Annual Breakdowns:</span>
+              <span className="font-mono">{exportInfo.budgetRows}</span>
             </div>
           </div>
-          <div className="rounded-xl border border-black/10 bg-white/60 p-3">
-            <div className="font-semibold tracking-tight">Annexes & downloads</div>
-            <div className="mt-1">
-              Annex rows: <span className="font-mono">{exportInfo.annexRows}</span>
+          <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-3 shadow-inner">
+            <div className="font-semibold tracking-tight text-black flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full bg-blue-500"></span>
+              Files & Resources
             </div>
-            <div className="mt-1">
-              Download rows: <span className="font-mono">{exportInfo.downloadRows}</span>
+            <div className="mt-2 flex justify-between">
+              <span className="text-black/60">Total Links:</span>
+              <span className="font-mono font-bold">{exportInfo.annexRows + exportInfo.downloadRows}</span>
+            </div>
+            <div className="mt-1 flex justify-between">
+              <span className="text-black/60">Topic Annexes:</span>
+              <span className="font-mono text-blue-700">{exportInfo.annexRows}</span>
             </div>
           </div>
         </div>
       ) : null}
 
-      {budgetRows && budgetRows.length > 0 ? (
-        <div className="mt-4 rounded-xl border border-black/10 bg-white/60 p-3 text-xs text-black">
-          <div className="font-semibold tracking-tight">Budget rows</div>
-          <div className="mt-2 overflow-auto">
-            <table className="min-w-full text-left text-[11px]">
+      {isLocalLoading ? (
+        <div className="mt-4 h-32 animate-pulse rounded-xl border border-black/5 bg-black/5" />
+      ) : budgetRows && budgetRows.length > 0 ? (
+        <div className="mt-4 rounded-xl border border-black/10 bg-white/60 p-4 text-xs text-black shadow-sm">
+          <div className="font-semibold tracking-tight flex items-center gap-2 border-b border-black/5 pb-2 mb-3">
+            <svg className="h-4 w-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            Financial Breakdown & Grants
+          </div>
+          <div className="overflow-auto">
+            <table className="min-w-full text-left text-[11px] border-separate border-spacing-y-1">
               <thead>
-                <tr className="border-b border-black/10">
-                  <th className="px-2 py-1 font-semibold">Year</th>
-                  <th className="px-2 py-1 font-semibold">Topic</th>
-                  <th className="px-2 py-1 font-semibold">Budget (EUR)</th>
-                  <th className="px-2 py-1 font-semibold">Budget (raw)</th>
+                <tr className="text-black/50">
+                  <th className="px-2 py-1 font-medium bg-black/5 rounded-l-md">Year</th>
+                  <th className="px-2 py-1 font-medium bg-black/5">Topic / Sub-call</th>
+                  <th className="px-2 py-1 font-medium bg-black/5 text-right">Budget (EUR)</th>
+                  <th className="px-2 py-1 font-medium bg-black/5 text-right">Est. Grants</th>
+                  <th className="px-2 py-1 font-medium bg-black/5 rounded-r-md">Status</th>
                 </tr>
               </thead>
               <tbody>
                 {budgetRows.map((b, idx) => (
-                  <tr key={`${b.topicCode ?? "topic"}-${b.budgetYear}-${idx}`} className="border-b border-black/5 last:border-b-0">
-                    <td className="px-2 py-1 align-top">{b.budgetYear}</td>
-                    <td className="px-2 py-1 align-top">
-                      <div className="font-mono">{b.topicCode ?? "—"}</div>
-                      <div className="text-[11px] text-black/70">
+                  <tr key={`${b.topicCode ?? "topic"}-${b.budgetYear}-${idx}`} className="group hover:bg-emerald-50/50 transition-colors">
+                    <td className="px-2 py-2 align-top border-b border-black/5 group-last:border-0">
+                      <span className="font-bold text-black/80">{b.budgetYear}</span>
+                    </td>
+                    <td className="px-2 py-2 align-top border-b border-black/5 group-last:border-0">
+                      <div className="font-bold text-emerald-900">{b.topicCode ?? "Main"}</div>
+                      <div className="text-[10px] text-black/60 leading-relaxed max-w-[250px]">
                         {b.topicTitle ?? b.topic ?? ""}
                       </div>
                     </td>
                     <td
                       className={[
-                        "px-2 py-1 align-top font-mono",
-                        b.budgetAmountEUR === null ? "text-rose-700" : "text-emerald-700",
+                        "px-2 py-2 align-top text-right border-b border-black/5 group-last:border-0 font-bold",
+                        b.budgetAmountEUR === null ? "text-rose-500" : "text-emerald-700",
                       ].join(" ")}
                     >
                       {b.budgetAmountEUR !== null
-                        ? formatEUR(b.budgetAmountEUR || 0)
-                        : "N/A"}
+                        ? `€${formatEUR(b.budgetAmountEUR || 0)}`
+                        : "Pending"}
                     </td>
-                    <td className="px-2 py-1 align-top">{b.budgetAmountRaw}</td>
+                    <td className="px-2 py-2 align-top text-right border-b border-black/5 group-last:border-0">
+                      {b.indicativeGrants ? (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-bold">
+                          {b.indicativeGrants}
+                        </span>
+                      ) : (
+                        <span className="text-black/30">—</span>
+                      )}
+                    </td>
+                    <td className="px-2 py-2 align-top border-b border-black/5 group-last:border-0 text-[10px] italic text-black/40">
+                      {b.budgetAmountRaw === "0" ? "TBD" : b.budgetAmountRaw}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -258,29 +309,52 @@ function OpportunityCard({
         </div>
       ) : null}
 
-      {annexes && annexes.length > 0 ? (
-        <div className="mt-4 rounded-xl border border-black/10 bg-white/60 p-3 text-xs text-black">
-          <div className="font-semibold tracking-tight">Annexes</div>
-          <div className="mt-2 overflow-auto">
-            <table className="min-w-full text-left text-[11px]">
+      {isLocalLoading ? (
+        <div className="mt-4 h-32 animate-pulse rounded-xl border border-black/5 bg-black/5" />
+      ) : ((annexes && annexes.length > 0) || (documents && documents.length > 0)) ? (
+        <div className="mt-4 rounded-xl border border-black/10 bg-white/60 p-4 text-xs text-black shadow-sm overflow-hidden">
+          <div className="font-semibold tracking-tight flex items-center gap-2 border-b border-black/5 pb-2 mb-3">
+            <svg className="h-4 w-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+            </svg>
+            Relevant Documents & Links
+          </div>
+          <div className="overflow-auto max-h-[400px]">
+            <table className="min-w-full text-left text-[11px] border-separate border-spacing-y-1">
               <thead>
-                <tr className="border-b border-black/10">
-                  <th className="px-2 py-1 font-semibold">Title</th>
-                  <th className="px-2 py-1 font-semibold">Link</th>
+                <tr className="text-black/50">
+                  <th className="px-2 py-1 font-medium bg-black/5 rounded-l-md">Type</th>
+                  <th className="px-2 py-1 font-medium bg-black/5">Title</th>
+                  <th className="px-2 py-1 font-medium bg-black/5 rounded-r-md">Link</th>
                 </tr>
               </thead>
               <tbody>
-                {annexes.map((a, idx) => (
-                  <tr key={`${a.url}-${idx}`} className="border-b border-black/5 last:border-b-0">
-                    <td className="px-2 py-1 align-top">{a.title}</td>
-                    <td className="px-2 py-1 align-top">
+                {[...(annexes || []), ...(documents || [])].map((item, idx) => (
+                  <tr key={`${item.url}-${idx}`} className="group hover:bg-blue-50/50 transition-colors">
+                    <td className="px-2 py-2 align-top">
+                      <span className={[
+                        "px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider whitespace-nowrap",
+                        item.kind === 'annex' ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"
+                      ].join(" ")}>
+                        {item.kind === 'annex' ? 'Annex' : (item.type || 'Doc')}
+                      </span>
+                    </td>
+                    <td className="px-2 py-2 align-top font-medium max-w-[200px] truncate" title={item.title}>
+                      {item.title}
+                    </td>
+                    <td className="px-2 py-2 align-top">
                       <a
-                        href={a.url}
+                        href={item.url}
                         target="_blank"
                         rel="noreferrer noopener"
-                        className="break-all underline decoration-black/20 underline-offset-2 hover:decoration-black/50"
+                        className="flex items-center gap-1 break-all text-blue-600 hover:text-blue-800 transition-colors"
                       >
-                        {a.url}
+                        <span className="truncate max-w-[300px] underline decoration-blue-500/30 underline-offset-2">
+                          {item.url}
+                        </span>
+                        <svg className="h-3 w-3 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                        </svg>
                       </a>
                     </td>
                   </tr>
@@ -291,73 +365,34 @@ function OpportunityCard({
         </div>
       ) : null}
 
-      {downloads && downloads.length > 0 ? (
-        <div className="mt-4 rounded-xl border border-black/10 bg-white/60 p-3 text-xs text-black">
-          <div className="font-semibold tracking-tight">Downloads</div>
-          <div className="mt-2 overflow-auto">
-            <table className="min-w-full text-left text-[11px]">
-              <thead>
-                <tr className="border-b border-black/10">
-                  <th className="px-2 py-1 font-semibold">Title</th>
-                  <th className="px-2 py-1 font-semibold">Type</th>
-                  <th className="px-2 py-1 font-semibold">Link</th>
-                </tr>
-              </thead>
-              <tbody>
-                {downloads.map((d, idx) => (
-                  <tr key={`${d.url}-${d.title}-${idx}`} className="border-b border-black/5 last:border-b-0">
-                    <td className="px-2 py-1 align-top">{d.title}</td>
-                    <td className="px-2 py-1 align-top">{d.type || "—"}</td>
-                    <td className="px-2 py-1 align-top">
-                      <a
-                        href={d.url}
-                        target="_blank"
-                        rel="noreferrer noopener"
-                        className="break-all underline decoration-black/20 underline-offset-2 hover:decoration-black/50"
-                      >
-                        {d.url}
-                      </a>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : null}
 
-      {href ? (
-        <div className="mt-4">
+      <div className="mt-6 flex flex-wrap items-center gap-3">
+        {topicCode || topicIdFromUrl(href) ? (
+          <Link
+            href={`/apply/${encodeURIComponent(topicCode || topicIdFromUrl(href) || "")}?runId=${runId || ""}`}
+            className="inline-flex items-center gap-2 rounded-lg bg-black px-5 py-2.5 text-sm font-semibold text-white transition hover:scale-[1.02] active:scale-[0.98] shadow-lg shadow-black/10"
+          >
+            Apply Now
+          </Link>
+        ) : null}
+        {href ? (
           <SafeExternalLink href={href}>
-            <span className="inline-flex items-center gap-2 rounded-lg bg-black/5 px-3 py-2 text-sm text-black hover:bg-black/10">
-              View on EU Portal →
+            <span className="inline-flex items-center gap-2 rounded-lg border border-black/10 bg-white/50 px-4 py-2 text-sm font-medium text-black backdrop-blur transition hover:bg-white hover:shadow-sm">
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+              View on EU Portal
             </span>
           </SafeExternalLink>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
 
-      <details
-        className="mt-4 rounded-xl border border-black/10 bg-white/60 p-3"
-        onToggle={(e) => setRawOpen((e.target as HTMLDetailsElement).open)}
-      >
-        <summary className="cursor-pointer text-sm font-semibold tracking-tight text-black">
-          Raw JSON
-        </summary>
-        {rawOpen ? (
-          <pre className="mt-2 max-h-80 overflow-auto rounded-lg bg-black/90 p-3 text-xs text-white/90">
-{JSON.stringify(opportunity, null, 2)}
-          </pre>
-        ) : (
-          <div className="mt-2 text-xs text-black">
-            Open to render JSON.
-          </div>
-        )}
-      </details>
     </article>
   );
 }
 
-export default function RunDetailPage() {
+export default function RunDetailPage()
+{
   const routeParams = useParams<{ runId: string | string[] }>();
   const runId = Array.isArray(routeParams?.runId)
     ? routeParams.runId[0]
@@ -371,16 +406,20 @@ export default function RunDetailPage() {
   const [q, setQ] = useState("");
 
   const [localReport, setLocalReport] = useState<LocalReport | null>(null);
+  const [localReportLoading, setLocalReportLoading] = useState(true);
   const [localReportError, setLocalReportError] = useState<string | null>(null);
 
-  useEffect(() => {
+  useEffect(() =>
+  {
     if (!firebaseReady || !rtdb || !runId) return;
 
     const runRef = ref(rtdb, `eu_discovery_results/${runId}`);
     const unsub = onValue(
       runRef,
-      (snap) => {
-        if (!snap.exists()) {
+      (snap) =>
+      {
+        if (!snap.exists())
+        {
           setRun(null);
           setLoading(false);
           return;
@@ -389,7 +428,8 @@ export default function RunDetailPage() {
         setRun(v);
         setLoading(false);
       },
-      (e) => {
+      (e) =>
+      {
         setError(errorMessage(e));
         setLoading(false);
       }
@@ -398,33 +438,43 @@ export default function RunDetailPage() {
     return () => unsub();
   }, [firebaseReady, runId]);
 
-  useEffect(() => {
+  useEffect(() =>
+  {
     let cancelled = false;
+    setLocalReportLoading(true);
 
     fetch("/api/local-report")
-      .then(async (r) => {
+      .then(async (r) =>
+      {
         const json = await r.json();
         if (!r.ok) throw new Error(json?.error || `HTTP ${r.status}`);
         return json as LocalReport;
       })
-      .then((data) => {
+      .then((data) =>
+      {
         if (cancelled) return;
         setLocalReport(data);
+        setLocalReportLoading(false);
       })
-      .catch((e) => {
+      .catch((e) =>
+      {
         if (cancelled) return;
         setLocalReportError(e instanceof Error ? e.message : String(e));
+        setLocalReportLoading(false);
       });
 
-    return () => {
+    return () =>
+    {
       cancelled = true;
     };
   }, []);
 
-  const annexesByTopicId = useMemo(() => {
+  const annexesByTopicId = useMemo(() =>
+  {
     const map = new Map<string, LinkRow[]>();
     const rows = localReport?.annexes?.rows ?? [];
-    for (const row of rows) {
+    for (const row of rows)
+    {
       const topicId = topicIdFromUrl(row.proposalUrl);
       if (!topicId) continue;
       const arr = map.get(topicId) ?? [];
@@ -434,10 +484,12 @@ export default function RunDetailPage() {
     return map;
   }, [localReport]);
 
-  const budgetsByTopicCode = useMemo(() => {
+  const budgetsByTopicCode = useMemo(() =>
+  {
     const map = new Map<string, BudgetRow[]>();
     const rows = localReport?.budgets?.rows ?? [];
-    for (const row of rows) {
+    for (const row of rows)
+    {
       const topicKey = row.topicCode || topicIdFromUrl(row.proposalUrl);
       if (!topicKey) continue;
       const arr = map.get(topicKey) ?? [];
@@ -447,10 +499,12 @@ export default function RunDetailPage() {
     return map;
   }, [localReport]);
 
-  const downloadsByTopicId = useMemo(() => {
+  const documentsByTopicId = useMemo(() =>
+  {
     const map = new Map<string, LinkRow[]>();
-    const rows = localReport?.downloads?.rows ?? [];
-    for (const row of rows) {
+    const rows = localReport?.documents?.rows ?? [];
+    for (const row of rows)
+    {
       const topicId = topicIdFromUrl(row.proposalUrl);
       if (!topicId) continue;
       const arr = map.get(topicId) ?? [];
@@ -460,16 +514,19 @@ export default function RunDetailPage() {
     return map;
   }, [localReport]);
 
-  const opportunities: Opportunity[] = useMemo(() => {
+  const opportunities: Opportunity[] = useMemo(() =>
+  {
     const data = run?.data;
     if (Array.isArray(data)) return data as Opportunity[];
     return [];
   }, [run]);
 
-  const filtered = useMemo(() => {
+  const filtered = useMemo(() =>
+  {
     const term = q.trim().toLowerCase();
     if (!term) return opportunities;
-    return opportunities.filter((o) => {
+    return opportunities.filter((o) =>
+    {
       const title = asString(o?.title)?.toLowerCase() ?? "";
       const topicCode = asString(o?.topicCode)?.toLowerCase() ?? "";
       return title.includes(term) || topicCode.includes(term);
@@ -492,9 +549,13 @@ export default function RunDetailPage() {
                   <span className="text-black">Unknown time</span>
                 )}
               </div>
-              <div className="mt-2 text-xs text-black">
+              <div className="mt-2 flex items-center gap-3 text-xs text-black">
                 <Link href="/" className="underline decoration-black/20 underline-offset-2 hover:decoration-black/50">
                   Back to runs
+                </Link>
+                <span>•</span>
+                <Link href="/applications" className="font-bold underline decoration-emerald-500/30 underline-offset-2 hover:decoration-emerald-500/60">
+                  AI Applications
                 </Link>
               </div>
             </div>
@@ -576,24 +637,52 @@ export default function RunDetailPage() {
           ) : (
             <div className="grid grid-cols-1 gap-4">
               {filtered.map((o, idx) => (
-                (() => {
+                (() =>
+                {
                   const topicKey =
                     asString(o?.topicCode) || topicIdFromUrl(asString(o?.href)) || "";
-                  const budgetRows = topicKey ? budgetsByTopicCode.get(topicKey) ?? [] : [];
-                  const annexes = topicKey ? annexesByTopicId.get(topicKey) ?? [] : [];
-                  const downloads = topicKey ? downloadsByTopicId.get(topicKey) ?? [] : [];
-                  const exportInfo: OpportunityExportInfo | undefined =
-                    budgetRows.length || annexes.length || downloads.length
-                      ? {
-                          budgetRows: budgetRows.length,
-                          annexRows: annexes.length,
-                          downloadRows: downloads.length,
-                          totalBudgetEUR: budgetRows.reduce(
-                            (sum, r) => sum + (r.budgetAmountEUR ?? 0),
-                            0
-                          ),
-                        }
-                      : undefined;
+                  const rawBudgetRows = topicKey ? budgetsByTopicCode.get(topicKey) ?? [] : [];
+
+                  // Deduplicate budget rows
+                  const budgetRowsMap = new Map();
+                  rawBudgetRows.forEach(b =>
+                  {
+                    const key = `${b.topicCode}-${b.budgetYear}-${b.budgetAmountRaw}`;
+                    if (!budgetRowsMap.has(key))
+                    {
+                      budgetRowsMap.set(key, b);
+                    }
+                  });
+                  const budgetRows = Array.from(budgetRowsMap.values());
+
+                  const allAnnexes = topicKey ? annexesByTopicId.get(topicKey) ?? [] : [];
+                  const allDocs = topicKey ? documentsByTopicId.get(topicKey) ?? [] : [];
+                  const hasData = budgetRows.length > 0 || allAnnexes.length > 0 || allDocs.length > 0;
+
+                  // Unified deduplication for all links
+                  const allLinks = [...allAnnexes, ...allDocs];
+                  const uniqueLinksMap = new Map();
+                  allLinks.forEach(l =>
+                  {
+                    if (!uniqueLinksMap.has(l.url))
+                    {
+                      uniqueLinksMap.set(l.url, l);
+                    }
+                  });
+                  const uniqueLinks = Array.from(uniqueLinksMap.values());
+                  const annexes = uniqueLinks.filter(l => l.kind === 'annex');
+                  const documents = uniqueLinks.filter(l => l.kind === 'document');
+
+                  const totalBudget = budgetRows.reduce((sum, r) => sum + (r.budgetAmountEUR ?? 0), 0);
+
+                  const exportInfo: OpportunityExportInfo | undefined = hasData
+                    ? {
+                      budgetRows: budgetRows.length,
+                      annexRows: annexes.length,
+                      downloadRows: documents.length,
+                      totalBudgetEUR: totalBudget,
+                    }
+                    : undefined;
 
                   return (
                     <OpportunityCard
@@ -603,7 +692,9 @@ export default function RunDetailPage() {
                       exportInfo={exportInfo}
                       budgetRows={budgetRows}
                       annexes={annexes}
-                      downloads={downloads}
+                      documents={documents}
+                      runId={runId}
+                      isLocalLoading={localReportLoading}
                     />
                   );
                 })()

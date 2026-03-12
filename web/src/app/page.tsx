@@ -7,9 +7,11 @@ import {
   limitToLast,
   onChildAdded,
   onChildChanged,
+  onChildRemoved,
   orderByChild,
   query,
   ref,
+  remove,
 } from "firebase/database";
 import { getMissingFirebaseEnvVars, rtdb } from "@/lib/firebase";
 
@@ -126,6 +128,14 @@ export default function Home() {
       (e) => setError(errorMessage(e))
     );
 
+    const unsubRemoved = onChildRemoved(
+      runsQuery,
+      (snap) => {
+        setRuns((prev) => prev.filter((r) => r.id !== snap.key));
+      },
+      (e) => setError(errorMessage(e))
+    );
+
     // End the "loading" state once the initial read completes (even if empty).
     get(runsQuery)
       .catch((e) => setError(errorMessage(e)))
@@ -134,8 +144,22 @@ export default function Home() {
     return () => {
       unsubAdded();
       unsubChanged();
+      unsubRemoved();
     };
   }, [firebaseReady]);
+
+  const handleDelete = async (e: React.MouseEvent, id: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (!rtdb || !confirm("Are you sure you want to delete this run? All discovered data for this specific run will be removed from the database.")) return;
+    
+    try {
+      await remove(ref(rtdb, `eu_discovery_results/${id}`));
+    } catch (e) {
+      alert(`Delete failed: ${errorMessage(e)}`);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[radial-gradient(1200px_700px_at_20%_10%,rgba(33,97,140,0.18),transparent_60%),radial-gradient(900px_600px_at_80%_0%,rgba(219,98,74,0.20),transparent_55%),linear-gradient(180deg,#fbf7f0,rgba(251,247,240,0.7))]">
@@ -150,8 +174,14 @@ export default function Home() {
               in Firebase RTDB.
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-3 text-xs text-black">
-            <span>Showing latest 20 runs</span>
+          <div className="flex flex-wrap items-center gap-4">
+            <Link 
+              href="/applications" 
+              className="inline-flex items-center gap-2 rounded-lg bg-black px-4 py-2 text-xs font-bold text-white transition hover:scale-105 active:scale-95 shadow-md"
+            >
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10l2 2h3a2 2 0 012 2v10a2 2 0 01-2 2z" /></svg>
+              AI Applications
+            </Link>
           </div>
         </header>
 
@@ -200,25 +230,35 @@ export default function Home() {
           ) : (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {runs.map((r) => (
-                <Link
-                  key={r.id}
-                  href={`/runs/${encodeURIComponent(r.id)}`}
-                  className="group rounded-2xl border border-black/10 bg-white/70 p-5 shadow-sm backdrop-blur transition hover:-translate-y-0.5 hover:bg-white"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="mt-2 text-base font-semibold tracking-tight text-black">
-                        {formatCreatedAt(r.createdAt)}
+                <div key={r.id} className="group relative">
+                  <Link
+                    href={`/runs/${encodeURIComponent(r.id)}`}
+                    className="block rounded-2xl border border-black/10 bg-white/70 p-5 shadow-sm backdrop-blur transition hover:-translate-y-0.5 hover:bg-white"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 pr-12">
+                        <div className="mt-2 text-base font-semibold tracking-tight text-black">
+                          {formatCreatedAt(r.createdAt)}
+                        </div>
+                        <div className="mt-1 truncate text-sm text-black">
+                          {r.dataCount ?? 0} opportunities
+                        </div>
                       </div>
-                      <div className="mt-1 truncate text-sm text-black">
-                        {r.dataCount ?? 0} opportunities
+                      <div className="rounded-full border border-black/10 bg-black/5 px-3 py-1 text-xs text-black group-hover:bg-black/10">
+                        Open
                       </div>
                     </div>
-                    <div className="rounded-full border border-black/10 bg-black/5 px-3 py-1 text-xs text-black group-hover:bg-black/10">
-                      Open
-                    </div>
-                  </div>
-                </Link>
+                  </Link>
+                  <button
+                    onClick={(e) => handleDelete(e, r.id)}
+                    className="absolute bottom-5 right-5 z-20 rounded-full border border-rose-100 bg-rose-50 p-2 text-rose-600 transition hover:bg-rose-100 shadow-sm"
+                    title="Delete Run"
+                  >
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
+                </div>
               ))}
             </div>
           )}

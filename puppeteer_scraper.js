@@ -261,6 +261,7 @@ async function discoverProposals(page, keyword) {
 	console.log("🔗 Waiting for 'See all calls for proposals' link...");
 	await page.waitForXPath(
 		`//a[contains(text(), "See all calls for proposals")]`,
+		{ timeout: 60000 }
 	);
 	console.log("✅ Link appeared");
 
@@ -270,11 +271,19 @@ async function discoverProposals(page, keyword) {
 
 	if (link) {
 		console.log("✅ Link found, clicking...");
-		await link.click();
+		try {
+			await link.click();
+		} catch (e) {
+			console.log("⚠️ Click failed, trying evaluate click...");
+			await page.evaluate((el) => el.click(), link);
+		}
 		console.log("✅ Link clicked");
 	} else {
 		throw new Error("Link not found");
 	}
+
+	console.log("⏳ Waiting for portal to transition...");
+	await new Promise((r) => setTimeout(r, 5000));
 
 	console.log("🔎 Waiting for 'All filters' button...");
 	try {
@@ -310,7 +319,7 @@ async function discoverProposals(page, keyword) {
 	console.log("✅ UI settled");
 
 	console.log("🔍 Looking for sidebar...");
-	await page.waitForSelector("div.eui-u-p-l");
+	await page.waitForSelector("div.eui-u-p-l", { timeout: 60000 });
 	console.log("✅ Sidebar found");
 
 	const sidebar = await page.$("div.eui-u-p-l");
@@ -322,7 +331,7 @@ async function discoverProposals(page, keyword) {
 	console.log("✅ Sidebar scrolled");
 
 	console.log("🔘 Waiting for 'Closed' radio button...");
-	await page.waitForXPath(`//label[contains(text(), "Closed")]`);
+	await page.waitForXPath(`//label[contains(text(), "Closed")]`, { timeout: 30000 });
 	console.log("✅ 'Closed' button found");
 
 	const [radioButtonForClsd] = await page.$x(
@@ -340,6 +349,7 @@ async function discoverProposals(page, keyword) {
 	console.log("🔎 Waiting for 'View results' button...");
 	await page.waitForXPath(
 		`//button[.//span[contains(text(), "View results")]]`,
+		{ timeout: 30000 }
 	);
 	console.log("✅ 'View results' button found");
 
@@ -401,6 +411,7 @@ async function discoverProposals(page, keyword) {
 	const allResults = [];
 
 	const extractCurrentPageResults = async () => {
+		await page.waitForSelector("div.eui-card-header__container", { timeout: 30000 });
 		return await page.$$eval(
 			"div.eui-card-header__container",
 			(containers) =>
@@ -446,9 +457,16 @@ async function discoverProposals(page, keyword) {
 		allResults.push(...pageResults);
 	}
 
-	const results = allResults;
+	// Deduplicate discovery results by URL
+	const uniqueResultsMap = new Map();
+	allResults.forEach(r => {
+		if (r.href && r.href !== 'N/A' && !uniqueResultsMap.has(r.href)) {
+			uniqueResultsMap.set(r.href, r);
+		}
+	});
+	const results = Array.from(uniqueResultsMap.values());
 
-	console.log(`\n✅ Found ${results.length} proposals (Total reported: ${totalItemsFound})`);
+	console.log(`\n✅ Found ${results.length} unique proposals (Total reported: ${totalItemsFound})`);
 	results.forEach((result, index) => {
 		console.log(`\n📋 Result ${index + 1}:`);
 		console.log(`   Title: ${result.title}`);
@@ -458,25 +476,16 @@ async function discoverProposals(page, keyword) {
 		console.log(`   URL: ${result.href}`);
 	});
 
-	const discoveryFile = path.join(
-		__dirname,
-		"proposal_discovery_results.json",
-	);
-	fs.writeFileSync(
-		discoveryFile,
-		JSON.stringify(results, null, 2),
-		"utf8",
-	);
-	console.log(
-		`\n💾 Discovery results saved to: proposal_discovery_results.json`,
-	);
-
 	try {
 		if (process.env.FIREBASE_DATABASE_URL || process.env.FIREBASE_SERVICE_ACCOUNT_PATH || process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-			console.log('⬆️ Uploading discovery results to Firebase...');
+			console.log('⬆️ Uploading discovery results to Firebase (Overwriting old runs)...');
 			const { initFirebase } = require('./firebaseClient');
 			const admin = initFirebase();
 			const db = admin.database();
+			
+			// Clear old discovery runs to leave only the current one
+			await db.ref('/eu_discovery_results').remove();
+			
 			const titles = results.map(r => r.title).filter(t => t && t !== 'N/A');
 			const ref = db.ref('/eu_discovery_results').push();
 			await ref.set({
@@ -484,10 +493,19 @@ async function discoverProposals(page, keyword) {
 				titles,
 				data: results,
 			});
-			console.log(`✅ Discovery results uploaded to Firebase at /eu_discovery_results/${ref.key}`);
+			console.log(`✅ Discovery results uploaded to Firebase (only current run remains)`);
 		}
 	} catch (e) {
 		console.warn('⚠️ Firebase discovery upload failed:', e.message || e);
+	}
+
+	// Try minimal local file write - wrap in try/catch to avoid fatal error if disk is full
+	try {
+		const discoveryFile = path.join(__dirname, "proposal_discovery_results.json");
+		fs.writeFileSync(discoveryFile, JSON.stringify(results, null, 2), "utf8");
+		console.log(`💾 Discovery results saved locally.`);
+	} catch (e) {
+		console.warn(`⚠️ Local discovery file save failed (likely disk full): ${e.message}`);
 	}
 
 	// Extract just the URLs for processing
@@ -686,7 +704,7 @@ async function extractUsefulFilesAndAnnexes(page) {
 			usefulFiles: [],
 			annexes: [],
 			relatedDocuments: [],
-			allDownloads: []
+			documents: []
 		};
 
 		// Extract links from various containers
@@ -695,7 +713,17 @@ async function extractUsefulFilesAndAnnexes(page) {
 				usefulFiles: [],
 				annexes: [],
 				relatedDocuments: [],
-				allDownloads: []
+				documents: []
+			};
+
+			const deduplicateByUrl = (arr) => {
+				const map = new Map();
+				arr.forEach(item => {
+					if (item.url && !map.has(item.url)) {
+						map.set(item.url, item);
+					}
+				});
+				return Array.from(map.values());
 			};
 
 			// Look for "Useful files" section
@@ -767,13 +795,19 @@ async function extractUsefulFilesAndAnnexes(page) {
 				const text = link.textContent.trim();
 				
 				if (isDownload && text && href) {
-					results.allDownloads.push({ 
+					results.documents.push({ 
 						title: text, 
 						url: href,
 						type: href.match(/\.([a-z]+)$/i)?.[1]?.toUpperCase() || 'DOCUMENT'
 					});
 				}
 			});
+
+			// Deduplicate all arrays by URL
+			results.usefulFiles = deduplicateByUrl(results.usefulFiles);
+			results.annexes = deduplicateByUrl(results.annexes);
+			results.relatedDocuments = deduplicateByUrl(results.relatedDocuments);
+			results.documents = deduplicateByUrl(results.documents);
 
 			return results;
 		});
@@ -857,7 +891,15 @@ async function extractTopics(page) {
 		const tableData = await extractTableData(page, "table");
 
 		if (tableData.length > 0) {
-			return tableData;
+			// Deduplicate rows by stringifying them
+			const seen = new Set();
+			const uniqueRows = tableData.filter(row => {
+				const s = JSON.stringify(row);
+				if (seen.has(s)) return false;
+				seen.add(s);
+				return true;
+			});
+			return uniqueRows;
 		}
 
 		return [];
@@ -1023,78 +1065,88 @@ async function extractProposalData(page, url) {
 			`📋 Processing ${discoveredUrls.length} proposal(s)...\n`,
 		);
 
-		const allResults = [];
+		const firebaseEnabled = (process.env.FIREBASE_DATABASE_URL || process.env.FIREBASE_SERVICE_ACCOUNT_PATH || process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+		let currentRunRef = null;
+		let successCount = 0;
+		let failedItems = [];
 
+		if (firebaseEnabled) {
+			console.log('🧹 Clearing old detailed proposals from Firebase...');
+			try {
+				const { initFirebase } = require('./firebaseClient');
+				const admin = initFirebase();
+				const db = admin.database();
+				
+				// Clear old detailed proposals data as requested
+				await db.ref('/eu_proposals').remove();
+				
+				// Create a new run node for the current session
+				currentRunRef = db.ref('/eu_proposals').push();
+				await currentRunRef.set({
+					createdAt: new Date().toISOString(),
+					sourceFile: 'live_streaming_run',
+					data: {} // We will push results into this node
+				});
+				console.log(`🚀 New extraction run initialized in Firebase: ${currentRunRef.key}`);
+			} catch (e) {
+				console.warn('❌ Firebase initialization failed:', e.message);
+			}
+		}
+
+		const allExtractionResults = [];
 		for (let i = 0; i < discoveredUrls.length; i++) {
 			const url = discoveredUrls[i];
-			console.log(
-				`\n⏳ [{counter}/${discoveredUrls.length}] Extracting details...`.replace(
-					"{counter}",
-					i + 1,
-				),
-			);
+			console.log(`\n⏳ [${i + 1}/${discoveredUrls.length}] Extracting details...`);
 
 			const result = await extractProposalData(page, url);
-			allResults.push(result);
+			
+			if (result.error) {
+				failedItems.push({ url, error: result.error });
+			} else {
+				successCount++;
+			}
+
+			// Collect result
+			allExtractionResults.push(result);
 
 			if (i < discoveredUrls.length - 1) {
 				await new Promise((r) => setTimeout(r, 1000));
 			}
 		}
 
-		// PHASE 3: SAVE RESULTS
-		console.log("\n" + "=".repeat(70));
-		console.log("PHASE 3: SAVE RESULTS");
-		console.log("=".repeat(70));
-
-		const outputFile = path.join(
-			__dirname,
-			"eu_proposals_extracted.json",
-		);
-		fs.writeFileSync(
-			outputFile,
-			JSON.stringify(allResults, null, 2),
-			"utf8",
-		);
-
-		console.log(`\n✅ Results saved to: eu_proposals_extracted.json`);
-
-		// Try to upload results to Firebase Realtime Database if configured
-		try {
-			if (process.env.FIREBASE_DATABASE_URL || process.env.FIREBASE_SERVICE_ACCOUNT_PATH || process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-				console.log('⬆️ Uploading results to Firebase Realtime Database...');
-				await uploadJsonFileToRTDB(outputFile, '/eu_proposals');
+		// SAVE AT THE END (As requested)
+		if (currentRunRef) {
+			try {
+				console.log(`\n⬆️ Uploading all ${allExtractionResults.length} records to Firebase...`);
+				await currentRunRef.child('data').set(allExtractionResults);
+				console.log(`✅ All results uploaded to Firebase`);
+			} catch (e) {
+				console.warn(`⚠️ Final Firebase save failed: ${e.message}`);
 			}
-		} catch (e) {
-			console.warn('⚠️ Firebase upload failed:', e.message || e);
 		}
 
 		// SUMMARY
-		console.log(`\n${"=".repeat(70)}`);
+		console.log("\n" + "=".repeat(70));
 		console.log("📊 EXECUTION SUMMARY");
-		console.log(`${"=".repeat(70)}`);
+		console.log("=".repeat(70));
 
-		const successful = allResults.filter((r) => !r.error);
-		const failed = allResults.filter((r) => r.error);
+		console.log(`✅ Total proposals processed: ${discoveredUrls.length}`);
+		console.log(`✅ Successful: ${successCount}`);
 
-		console.log(`✅ Total proposals processed: ${allResults.length}`);
-		console.log(`✅ Successful: ${successful.length}`);
-
-		if (failed.length > 0) {
-			console.log(`❌ Failed: ${failed.length}`);
-			failed.forEach((r) => {
+		if (failedItems.length > 0) {
+			console.log(`❌ Failed: ${failedItems.length}`);
+			failedItems.forEach((r) => {
 				console.log(`   - ${r.url}: ${r.error}`);
 			});
 		}
 
 		console.log(`${"=".repeat(70)}\n`);
-
 		console.log("🎉 Script completed successfully!");
-		console.log(
-			"\n📁 Output files:",
-		);
-		console.log(`   • proposal_discovery_results.json`);
-		console.log(`   • eu_proposals_extracted.json`);
+
+		if (currentRunRef) {
+			console.log(`📡 Data streamed live to Firebase: ${currentRunRef.key}`);
+		}
+
 	} catch (error) {
 		console.error("\n💥 Fatal error:", error);
 	} finally {

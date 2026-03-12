@@ -1,5 +1,5 @@
-import fs from "node:fs/promises";
-import path from "node:path";
+import { get, ref } from "firebase/database";
+import { rtdb } from "@/lib/firebase";
 
 export const runtime = "nodejs";
 
@@ -78,7 +78,7 @@ type BudgetRow = {
 
 type LinkRow = {
   proposalUrl: string;
-  kind: "annex" | "download";
+  kind: "annex" | "document";
   title: string;
   url: string;
   type?: string;
@@ -87,7 +87,7 @@ type LinkRow = {
 };
 
 type UniqueLinkRow = {
-  kind: "annex" | "download";
+  kind: "annex" | "document";
   title: string;
   url: string;
   type?: string;
@@ -106,30 +106,24 @@ type ProposalSummary = {
   totalBudgetEUR: number;
 };
 
-const EXPORT_FILENAME = "upworkbot-790d5-default-rtdb-export (1).json";
-const EXPORT_PATH = path.resolve(process.cwd(), "..", EXPORT_FILENAME);
+
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const runId = url.searchParams.get("runId") || "";
 
   try {
-    const raw = await fs.readFile(EXPORT_PATH, "utf8");
-    const data = JSON.parse(raw) as unknown;
-
-    if (!isRecord(data)) {
-      return Response.json(
-        { error: "Unexpected export format (expected object at root)." },
-        { status: 400 }
-      );
+    if (!rtdb) {
+      return Response.json({ error: "Firebase not initialized." }, { status: 500 });
     }
 
-    const euDiscovery = isRecord(data.eu_discovery_results)
-      ? (data.eu_discovery_results as UnknownRecord)
-      : {};
-    const euProposals = isRecord(data.eu_proposals)
-      ? (data.eu_proposals as UnknownRecord)
-      : {};
+    const [discoverySnap, proposalsSnap] = await Promise.all([
+      get(ref(rtdb, "eu_discovery_results")),
+      get(ref(rtdb, "eu_proposals"))
+    ]);
+
+    const euDiscovery = discoverySnap.val() || {};
+    const euProposals = proposalsSnap.val() || {};
 
     const discoveryRuns: ReportRunSummary[] = Object.entries(euDiscovery).map(
       ([id, v]) => {
@@ -250,8 +244,13 @@ export async function GET(req: Request) {
           ? (filesAndAnnexes.allDownloads as unknown[])
           : [];
 
+        // Documents (formerly downloads)
+        const documentsArr = filesAndAnnexes && Array.isArray(filesAndAnnexes.documents)
+          ? (filesAndAnnexes.documents as unknown[])
+          : [];
+
         if (annexesArr.length) proposalsWithAnnexes++;
-        if (downloadsArr.length) proposalsWithDownloads++;
+        if (documentsArr.length) proposalsWithDownloads++;
 
         for (const a of annexesArr) {
           if (!isRecord(a)) continue;
@@ -269,7 +268,7 @@ export async function GET(req: Request) {
           proposalSummary.annexRows += 1;
         }
 
-        for (const d of downloadsArr) {
+        for (const d of documentsArr) {
           if (!isRecord(d)) continue;
           const title = (asString(d.title) ?? "").trim();
           const link = (asString(d.url) ?? "").trim();
@@ -277,7 +276,7 @@ export async function GET(req: Request) {
           if (!link) continue;
           links.push({
             proposalUrl,
-            kind: "download",
+            kind: "document",
             title: title || "(untitled)",
             url: link,
             type,
@@ -302,7 +301,7 @@ export async function GET(req: Request) {
       .map(([year, v]) => ({ year: Number(year), totalEUR: v.total, rows: v.count }))
       .sort((a, b) => a.year - b.year);
 
-    const uniqueLinks = (kind: "annex" | "download"): UniqueLinkRow[] => {
+    const uniqueLinks = (kind: "annex" | "document"): UniqueLinkRow[] => {
       const map = new Map<string, { row: UniqueLinkRow; proposalUrls: Set<string> }>();
       for (const r of links) {
         if (r.kind !== kind) continue;
@@ -334,7 +333,7 @@ export async function GET(req: Request) {
     };
 
     const annexesUnique = uniqueLinks("annex");
-    const downloadsUnique = uniqueLinks("download");
+    const documentsUnique = uniqueLinks("document");
 
     const proposals = Array.from(proposalsByKey.values()).sort((a, b) => {
       const at = a.proposalRunCreatedAt ? Date.parse(a.proposalRunCreatedAt) : 0;
@@ -345,7 +344,6 @@ export async function GET(req: Request) {
     return Response.json({
       meta: {
         generatedAt: new Date().toISOString(),
-        sourcePath: EXPORT_PATH,
         runId: runId || null,
       },
       discoveryRuns: discoveryRuns
@@ -363,9 +361,9 @@ export async function GET(req: Request) {
         proposalsWithAnnexes,
         proposalsWithDownloads,
         annexRows: links.filter((l) => l.kind === "annex").length,
-        downloadRows: links.filter((l) => l.kind === "download").length,
+        downloadRows: links.filter((l) => l.kind === "document").length,
         uniqueAnnexUrls: annexesUnique.length,
-        uniqueDownloadUrls: downloadsUnique.length,
+        uniqueDownloadUrls: documentsUnique.length,
       },
       budgets: {
         totalsByYear,
@@ -375,21 +373,20 @@ export async function GET(req: Request) {
         rows: links.filter((l) => l.kind === "annex"),
         unique: annexesUnique,
       },
-      downloads: {
-        rows: links.filter((l) => l.kind === "download"),
-        unique: downloadsUnique,
+      documents: {
+        rows: links.filter((l) => l.kind === "document"),
+        unique: documentsUnique,
       },
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    if (msg.includes("ENOENT")) {
+    if (msg.includes("permission_denied")) {
       return Response.json(
         {
-          error: "Export file not found.",
-          expectedPath: EXPORT_PATH,
-          expectedFilename: EXPORT_FILENAME,
+          error: "Permission denied on Firebase RTDB.",
+          details: "Check your security rules for /eu_discovery_results and /eu_proposals.",
         },
-        { status: 404 }
+        { status: 403 }
       );
     }
     return Response.json(
