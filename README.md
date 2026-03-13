@@ -1,83 +1,130 @@
-Puppeteer scraper for EU Calls-for-Proposals
+# 🇪🇺 EU Proposal Bot & AI Writer
 
-Usage
+A comprehensive system to **automatically discover** EU funding opportunities and **generate professional AI proposals** in seconds.
 
-- Install dependencies:
+This guide is designed for **non-technical users** to set up the system from scratch.
 
-```bash
-npm install
-```
+---
 
-- Run with a keyword as argument:
+## 🚀 Overview
 
-```bash
-node puppeteer_scraper.js "climate" 
-```
+The system consists of two parts:
+1.  **The Scraper (Bot)**: Runs on your computer. It visits the EU portal, finds calls, and uploads them to your database.
+2.  **The Web App**: Hosted on the internet (Vercel). It allows you to view discoveries, edit them, and click "Generate" to have AI write your grant application.
 
-If no argument is provided the script will prompt for a keyword.
+---
 
-What it does
+## 🛠️ Phase 1: Create Your "Brain" (Firebase Setup)
 
-- Opens the EU calls-for-proposals page in a visible Chrome window.
-- Finds a search input on the page and types the provided keyword, then presses Enter.
-- Extracts proposal details and writes `eu_proposals_extracted.json` in the project root.
+Firebase is where all your data lives. It's free for this usage level.
 
-Firebase Realtime Database integration
+### 1. Create a Firebase Project
+1.  Go to [Firebase Console](https://console.firebase.google.com/).
+2.  Click **"Add project"** and name it (e.g., `EU-Proposal-Bot`).
+3.  Disable Google Analytics (not needed) and click **"Create project"**.
 
-After the scraper finishes it can automatically upload `eu_proposals_extracted.json` to Firebase Realtime Database.
+### 2. Enable the Database
+1.  In the left sidebar, click **"Build"** -> **"Realtime Database"**.
+2.  Click **"Create Database"**.
+3.  Choose a location (closest to you) and click **Next**.
+4.  Select **"Start in test mode"** (this is easier for setup) and click **Enable**.
+5.  **Copy the URL** (it looks like `https://your-project.firebaseio.com/`). This is your `FIREBASE_DATABASE_URL`.
 
+### 3. Get the "Service Account" Key (For the Bot)
+*This file allows the Bot to write to your database.*
+1.  Click the ⚙️ (gear icon) next to **Project Overview** -> **Project settings**.
+2.  Go to the **"Service accounts"** tab.
+3.  Click **"Generate new private key"**.
+4.  A file named `something-firebase-adminsdk-...json` will download.
+5.  **Rename this file to `serviceAccount.json`** and place it inside the main bot folder.
 
-You can view a generated report in the Next.js app:
+### 4. Get the "Web Config" (For the Web App)
+*This allows the Website to read your database.*
+1.  In **Project settings**, go to the **"General"** tab.
+2.  Scroll down to "Your apps" and click the `</>` (web) icon.
+3.  Name it `Web App` and click **Register app**.
+4.  You will see a code block containing `apiKey`, `authDomain`, etc. Keep this tab open; you'll need these values for Vercel.
 
-```bash
-cd web
-npm install
-npm run dev
-```
+---
 
-Then open `/report` in the web app to see:
+## 🤖 Phase 2: AI Power (Perplexity Setup)
 
-- Summary cards
-- Budget tables (parsed from proposal `topics[]` rows, e.g. `Budget (EUR) - Year : 2025`)
-- Annexes and download links
-- One-click CSV/JSON downloads for each table
+To generate the proposals, we use Perplexity AI.
 
-Setup
+1.  Go to [Perplexity Settings](https://www.perplexity.ai/settings/api).
+2.  Add credit (e.g., $5 - it lasts a long time).
+3.  Generate an **API Key**. It starts with `pplx-...`.
+4.  Copy this key. This is your `PERPLEXITY_API_KEY`.
 
-1. Install dependencies:
+---
 
-```bash
-npm install
-```
+## 💻 Phase 3: Setup the Bot (Local Computer)
 
-2. Provide Firebase credentials via environment variables. Create a `.env` file in the project root with one of the following options:
+### 1. Install Node.js
+Go to [nodejs.org](https://nodejs.org/) and download the **LTS** version. Install it like any other program.
 
-- Using a service account JSON file path:
+### 2. Prepare the Folder
+1.  Open the folder containing this code.
+2.  Make sure your `serviceAccount.json` is in this folder.
+3.  Create a file named `.env` in this main folder and paste this:
+    ```text
+    FIREBASE_SERVICE_ACCOUNT_PATH=./serviceAccount.json
+    FIREBASE_DATABASE_URL=https://your-project-url.firebaseio.com/
+    ```
+    *(Replace with your actual URL from Phase 1)*
 
-FIREBASE_SERVICE_ACCOUNT_PATH=./serviceAccountKey.json
-FIREBASE_DATABASE_URL=https://<YOUR_PROJECT>.firebaseio.com
+### 3. Run the Bot
+1.  Open your computer's terminal (Command Prompt on Windows, Terminal on Mac).
+2.  Type `cd` followed by a space, then drag the bot folder into the window and press Enter.
+3.  Type `npm install` and wait for it to finish.
+4.  To start searching, type:
+    ```bash
+    node puppeteer_scraper.js "your search topic"
+    ```
+    *Example: `node puppeteer_scraper.js "hydrogen energy"`*
 
-- Or embed the service account JSON contents (be careful with secrets):
+---
 
-FIREBASE_SERVICE_ACCOUNT_JSON="{ \"type\": \"service_account\", ... }"
-FIREBASE_DATABASE_URL=https://<YOUR_PROJECT>.firebaseio.com
+## 🌐 Phase 4: Host the Website (Vercel)
 
-- Or rely on Application Default Credentials (not recommended for local dev).
+You want to access your proposals from anywhere without keeping your computer on.
 
-3. Run the scraper:
+### 1. Upload to GitHub
+1.  Create a free account on [GitHub](https://github.com/).
+2.  Create a "New Repository" and upload all the files there (except `node_modules`).
 
-```bash
-npm run scrape:initial -- "your search keyword"
-```
+### 1. Dedicated Hosting (Optional)
+If you do not want to set up your own website, you can use the pre-configured hosted version:
+**[https://upwork-bot-eu.vercel.app](https://upwork-bot-eu.vercel.app)**
+*(Note: You still need to run the Bot locally to feed data into your own database used by this site).*
 
-If Firebase env is set, the script will try to upload results to the RTDB path `/eu_proposals` and push a new node with `createdAt`, `sourceFile`, and `data`.
+### 2. Host Your Own (Recommended for full control)
+You may want to host your own copy to have total control over the data and AI settings.
+3.  Select your GitHub repository.
+4.  **CRITICAL**: Under **"Root Directory"**, click "Edit" and select the `web` folder.
+5.  Open the **"Environment Variables"** section and add the following keys with the values from your Firebase Web Config (Phase 1, Step 4) and Perplexity (Phase 2):
 
-Notes
+| Key | Value |
+| :--- | :--- |
+| `NEXT_PUBLIC_FIREBASE_API_KEY` | Your apiKey |
+| `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN` | Your authDomain |
+| `NEXT_PUBLIC_FIREBASE_PROJECT_ID` | Your projectId |
+| `NEXT_PUBLIC_FIREBASE_DATABASE_URL` | Your databaseURL |
+| `NEXT_PUBLIC_FIREBASE_APP_ID` | Your appId |
+| `PERPLEXITY_API_KEY` | Your pplx-... key |
 
-- Use `FIREBASE_DATABASE_URL` from your Firebase Realtime Database dashboard.
-- Protect your service account credentials. Do not commit them to version control.
+6.  Click **"Deploy"**.
 
-Auto-detection
+### 3. Done!
+Vercel will give you a link (e.g., `https://my-proposal-bot.vercel.app`). Open it to see your proposals!
 
-- If you place a Firebase service account JSON in the project root (for example `upworkbot-790d5-firebase-adminsdk-fbsvc-f7f940e183.json`), the project will attempt to auto-detect and use it when no `FIREBASE_SERVICE_ACCOUNT_PATH` or `FIREBASE_SERVICE_ACCOUNT_JSON` is provided.
-- The code will also try to derive a reasonable `FIREBASE_DATABASE_URL` from the service account `project_id` when `FIREBASE_DATABASE_URL` is not explicitly set; verify the derived URL and update if necessary.
+---
+
+## 📝 Maintenance
+*   **Update Proposals**: Run the bot on your computer whenever you want to find new calls.
+*   **Generate Proposals**: Open your Vercel website, select a call, and click "Apply/Draft". The AI will write the content and you can download it as PDF or Word.
+
+---
+
+> [!TIP]
+> **Security**: Never share your `serviceAccount.json` or `.env` files with anyone. They are the keys to your database.
