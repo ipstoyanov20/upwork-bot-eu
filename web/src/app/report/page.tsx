@@ -184,7 +184,6 @@ export default function LocalExportReportPage() {
 
   const [budgetQ, setBudgetQ] = useState("");
   const [annexQ, setAnnexQ] = useState("");
-  const [downloadQ, setDownloadQ] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -249,32 +248,6 @@ export default function LocalExportReportPage() {
     });
   }, [report, annexQ]);
 
-  const filteredDownloads = useMemo(() => {
-    const rows = report?.downloads.unique ?? [];
-    const q = downloadQ.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) => {
-      const hay = [r.title, r.url, r.type]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return hay.includes(q);
-    });
-  }, [report, downloadQ]);
-
-  const filteredDownloadRowsAll = useMemo(() => {
-    const rows = report?.downloads.rows ?? [];
-    const q = downloadQ.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) => {
-      const hay = [r.title, r.url, r.type, r.proposalUrl, r.proposalRunId]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return hay.includes(q);
-    });
-  }, [report, downloadQ]);
-
   const bg =
     "min-h-screen bg-[radial-gradient(1200px_700px_at_20%_10%,rgba(33,97,140,0.18),transparent_60%),radial-gradient(900px_600px_at_80%_0%,rgba(219,98,74,0.20),transparent_55%),linear-gradient(180deg,#fbf7f0,rgba(251,247,240,0.7))]";
 
@@ -287,8 +260,7 @@ export default function LocalExportReportPage() {
               Local Export Report
             </h1>
             <p className="mt-1 text-sm text-black">
-              Builds summary, budget tables, annexes, and downloads from{" "}
-              <code className="font-mono">upworkbot-790d5-default-rtdb-export (1).json</code>.
+              Builds summary, budget tables, and annexes from live Firebase data.
             </p>
             <div className="mt-2 text-xs text-black">
               <Link
@@ -358,7 +330,7 @@ export default function LocalExportReportPage() {
                   { k: "Proposals", v: report.summary.proposals },
                   { k: "Budget rows", v: report.summary.budgetRows },
                   { k: "Annex rows", v: report.summary.annexRows },
-                  { k: "Unique downloads", v: report.summary.uniqueDownloadUrls },
+                  { k: "Proposals with Topics", v: report.summary.proposalsWithTopics },
                 ].map((x) => (
                   <div
                     key={x.k}
@@ -376,7 +348,7 @@ export default function LocalExportReportPage() {
 
               <div className="mt-4 rounded-xl border border-black/10 bg-white/60 p-4 text-xs text-black/80">
                 <div>
-                  Export path: <code className="font-mono">{report.meta.sourcePath}</code>
+                  Source: <span className="font-mono">Firebase Realtime Database</span>
                 </div>
                 <div className="mt-1">
                   Discovery runs:{" "}
@@ -599,151 +571,9 @@ export default function LocalExportReportPage() {
                 rowKey={(r, idx) => `${String(r.url ?? "")}-${idx}`}
               />
             </Section>
-
-            <Section
-              title="Downloads (unique URLs)"
-              right={
-                <>
-                  <input
-                    value={downloadQ}
-                    onChange={(e) => setDownloadQ(e.target.value)}
-                    placeholder="Filter downloads..."
-                    className="w-64 rounded-xl border border-black/10 bg-white/80 px-3 py-2 text-xs text-black outline-none focus:border-black/30"
-                  />
-                  <button
-                    onClick={() =>
-                      downloadText(
-                        `downloads-unique${runId ? `-${runId}` : ""}.json`,
-                        JSON.stringify(filteredDownloads, null, 2),
-                        "application/json"
-                      )
-                    }
-                    className="rounded-xl border border-black/10 bg-black/5 px-3 py-2 text-xs font-semibold text-black hover:bg-black/10"
-                  >
-                    Download JSON
-                  </button>
-                  <button
-                    onClick={() =>
-                      downloadText(
-                        `downloads-unique${runId ? `-${runId}` : ""}.csv`,
-                        toCsv(filteredDownloads as unknown as Array<Record<string, unknown>>, [
-                          { key: "title", label: "Title" },
-                          { key: "type", label: "Type" },
-                          { key: "url", label: "URL" },
-                          { key: "occurrences", label: "Occurrences" },
-                          { key: "proposalCount", label: "Proposal Count" },
-                        ])
-                      )
-                    }
-                    className="rounded-xl border border-black/10 bg-black/5 px-3 py-2 text-xs font-semibold text-black hover:bg-black/10"
-                  >
-                    Download unique CSV
-                  </button>
-                  <button
-                    onClick={() =>
-                      downloadText(
-                        `downloads-all-rows${runId ? `-${runId}` : ""}.csv`,
-                        toCsv(filteredDownloadRowsAll as unknown as Array<Record<string, unknown>>, [
-                          { key: "proposalRunId", label: "Run ID" },
-                          { key: "proposalRunCreatedAt", label: "Run Created At" },
-                          { key: "proposalUrl", label: "Proposal URL" },
-                          { key: "title", label: "Title" },
-                          { key: "type", label: "Type" },
-                          { key: "url", label: "URL" },
-                        ])
-                      )
-                    }
-                    className="rounded-xl border border-black/10 bg-black/5 px-3 py-2 text-xs font-semibold text-black hover:bg-black/10"
-                  >
-                    Download all rows CSV
-                  </button>
-                </>
-              }
-            >
-              <div className="mb-3 text-xs text-black/70">
-                Showing {filteredDownloads.length.toLocaleString()} of{" "}
-                {report.downloads.unique.length.toLocaleString()} unique download URLs
-              </div>
-              <Table
-                columns={[
-                  { key: "title", label: "Title" },
-                  { key: "type", label: "Type" },
-                  {
-                    key: "url",
-                    label: "Link",
-                    render: (r) => (
-                      <a
-                        className="underline decoration-black/20 underline-offset-2 hover:decoration-black/50"
-                        href={r.url as string}
-                        target="_blank"
-                        rel="noreferrer noopener"
-                      >
-                        {r.url as string}
-                      </a>
-                    ),
-                  },
-                  { key: "occurrences", label: "Occurrences" },
-                  { key: "proposalCount", label: "Proposals" },
-                ]}
-                rows={filteredDownloads as unknown as Array<Record<string, unknown>>}
-                rowKey={(r) => String(r.url ?? "")}
-              />
-
-              <details className="mt-4 rounded-xl border border-black/10 bg-white/60 p-4">
-                <summary className="cursor-pointer text-sm font-semibold tracking-tight text-black">
-                  All download rows (including duplicates)
-                </summary>
-                <div className="mt-3 text-xs text-black/70">
-                  Showing {filteredDownloadRowsAll.length.toLocaleString()} of{" "}
-                  {report.downloads.rows.length.toLocaleString()} download rows
-                </div>
-                <div className="mt-3">
-                  <Table
-                    columns={[
-                      { key: "title", label: "Title" },
-                      { key: "type", label: "Type" },
-                      {
-                        key: "url",
-                        label: "Link",
-                        render: (r) => (
-                          <a
-                            className="underline decoration-black/20 underline-offset-2 hover:decoration-black/50"
-                            href={r.url as string}
-                            target="_blank"
-                            rel="noreferrer noopener"
-                          >
-                            {r.url as string}
-                          </a>
-                        ),
-                      },
-                      {
-                        key: "proposalUrl",
-                        label: "Proposal",
-                        render: (r) =>
-                          (r.proposalUrl as string) ? (
-                            <a
-                              className="underline decoration-black/20 underline-offset-2 hover:decoration-black/50"
-                              href={r.proposalUrl as string}
-                              target="_blank"
-                              rel="noreferrer noopener"
-                            >
-                              Open →
-                            </a>
-                          ) : (
-                            "—"
-                          ),
-                      },
-                    ]}
-                    rows={filteredDownloadRowsAll as unknown as Array<Record<string, unknown>>}
-                    rowKey={(r, idx) => `${String(r.url ?? "")}-${idx}`}
-                  />
-                </div>
-              </details>
-            </Section>
           </>
         )}
       </div>
     </div>
   );
 }
-

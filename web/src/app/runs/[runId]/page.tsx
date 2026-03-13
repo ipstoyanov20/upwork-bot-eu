@@ -168,6 +168,7 @@ function OpportunityCard({
   const isDeadlineSoon =
     deadlineTs !== null && deadlineTs >= now && deadlineTs - now <= 1000 * 60 * 60 * 24 * 30;
   const isDeadlinePast = deadlineTs !== null && deadlineTs < now;
+  const uniqueLinks = [...(annexes || []), ...(documents || [])];
 
   return (
     <article className="rounded-2xl border border-black/10 bg-white/70 p-5 shadow-sm backdrop-blur">
@@ -179,6 +180,16 @@ function OpportunityCard({
           </div>
           {topicCode ? <div className="mt-1 text-xs font-mono text-black">{topicCode}</div> : null}
         </div>
+        {href ? (
+          <SafeExternalLink href={href}>
+            <span className="inline-flex items-center gap-2 rounded-lg border border-black/10 bg-white/50 px-4 py-2 text-xs font-medium text-black backdrop-blur transition hover:bg-white hover:shadow-sm">
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+              </svg>
+              Standard Portal
+            </span>
+          </SafeExternalLink>
+        ) : null}
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-4">
@@ -235,12 +246,11 @@ function OpportunityCard({
               Files & Resources
             </div>
             <div className="mt-2 flex justify-between">
-              <span className="text-black/60">Total Links:</span>
+              <span className="text-black/60">Total Files:</span>
               <span className="font-mono font-bold">{exportInfo.annexRows + exportInfo.downloadRows}</span>
             </div>
-            <div className="mt-1 flex justify-between">
-              <span className="text-black/60">Topic Annexes:</span>
-              <span className="font-mono text-blue-700">{exportInfo.annexRows}</span>
+            <div className="mt-1 flex justify-between text-[10px]">
+              <span className="text-black/40 italic">Annexes: {exportInfo.annexRows} • Others: {exportInfo.downloadRows}</span>
             </div>
           </div>
         </div>
@@ -311,13 +321,13 @@ function OpportunityCard({
 
       {isLocalLoading ? (
         <div className="mt-4 h-32 animate-pulse rounded-xl border border-black/5 bg-black/5" />
-      ) : ((annexes && annexes.length > 0) || (documents && documents.length > 0)) ? (
+      ) : (uniqueLinks && uniqueLinks.length > 0) ? (
         <div className="mt-4 rounded-xl border border-black/10 bg-white/60 p-4 text-xs text-black shadow-sm overflow-hidden">
           <div className="font-semibold tracking-tight flex items-center gap-2 border-b border-black/5 pb-2 mb-3">
             <svg className="h-4 w-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
             </svg>
-            Relevant Documents & Links
+            Programme Files & Resources
           </div>
           <div className="overflow-auto max-h-[400px]">
             <table className="min-w-full text-left text-[11px] border-separate border-spacing-y-1">
@@ -329,14 +339,14 @@ function OpportunityCard({
                 </tr>
               </thead>
               <tbody>
-                {[...(annexes || []), ...(documents || [])].map((item, idx) => (
+                {(uniqueLinks || []).map((item, idx) => (
                   <tr key={`${item.url}-${idx}`} className="group hover:bg-blue-50/50 transition-colors">
                     <td className="px-2 py-2 align-top">
                       <span className={[
                         "px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider whitespace-nowrap",
                         item.kind === 'annex' ? "bg-amber-100 text-amber-700" : "bg-blue-100 text-blue-700"
                       ].join(" ")}>
-                        {item.kind === 'annex' ? 'Annex' : (item.type || 'Doc')}
+                        {item.kind === 'annex' ? 'Annex' : (item.type || 'Link')}
                       </span>
                     </td>
                     <td className="px-2 py-2 align-top font-medium max-w-[200px] truncate" title={item.title}>
@@ -374,16 +384,6 @@ function OpportunityCard({
           >
             Apply Now
           </Link>
-        ) : null}
-        {href ? (
-          <SafeExternalLink href={href}>
-            <span className="inline-flex items-center gap-2 rounded-lg border border-black/10 bg-white/50 px-4 py-2 text-sm font-medium text-black backdrop-blur transition hover:bg-white hover:shadow-sm">
-              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-              </svg>
-              View on EU Portal
-            </span>
-          </SafeExternalLink>
         ) : null}
       </div>
 
@@ -643,11 +643,13 @@ export default function RunDetailPage()
                     asString(o?.topicCode) || topicIdFromUrl(asString(o?.href)) || "";
                   const rawBudgetRows = topicKey ? budgetsByTopicCode.get(topicKey) ?? [] : [];
 
-                  // Deduplicate budget rows
+                  // Deduplicate budget rows with more robust key
                   const budgetRowsMap = new Map();
                   rawBudgetRows.forEach(b =>
                   {
-                    const key = `${b.topicCode}-${b.budgetYear}-${b.budgetAmountRaw}`;
+                    // Normalize amount for keying (remove whitespace, currency symbols)
+                    const normalizedAmt = (b.budgetAmountRaw || "").replace(/[^0-9.]/g, '') || "0";
+                    const key = `${b.topicCode || 'main'}-${b.budgetYear}-${normalizedAmt}`;
                     if (!budgetRowsMap.has(key))
                     {
                       budgetRowsMap.set(key, b);
@@ -669,9 +671,9 @@ export default function RunDetailPage()
                       uniqueLinksMap.set(l.url, l);
                     }
                   });
-                  const uniqueLinks = Array.from(uniqueLinksMap.values());
+                   const uniqueLinks = Array.from(uniqueLinksMap.values());
                   const annexes = uniqueLinks.filter(l => l.kind === 'annex');
-                  const documents = uniqueLinks.filter(l => l.kind === 'document');
+                  const documents = uniqueLinks.filter(l => l.kind !== 'annex');
 
                   const totalBudget = budgetRows.reduce((sum, r) => sum + (r.budgetAmountEUR ?? 0), 0);
 
@@ -691,7 +693,7 @@ export default function RunDetailPage()
                       index={idx}
                       exportInfo={exportInfo}
                       budgetRows={budgetRows}
-                      annexes={annexes}
+                       annexes={annexes}
                       documents={documents}
                       runId={runId}
                       isLocalLoading={localReportLoading}
