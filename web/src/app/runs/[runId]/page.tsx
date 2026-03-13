@@ -258,7 +258,7 @@ function OpportunityCard({
 
       {isLocalLoading ? (
         <div className="mt-4 h-32 animate-pulse rounded-xl border border-black/5 bg-black/5" />
-      ) : budgetRows && budgetRows.length > 0 ? (
+      ) : (budgetRows && budgetRows.length > 0) ? (
         <div className="mt-4 rounded-xl border border-black/10 bg-white/60 p-4 text-xs text-black shadow-sm">
           <div className="font-semibold tracking-tight flex items-center gap-2 border-b border-black/5 pb-2 mb-3">
             <svg className="h-4 w-4 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -317,7 +317,15 @@ function OpportunityCard({
             </table>
           </div>
         </div>
-      ) : null}
+      ) : (
+        <div className="mt-4 rounded-xl border border-dashed border-black/10 bg-black/[0.01] p-6 text-center">
+          <svg className="mx-auto h-8 w-8 text-black/10 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <div className="text-xs font-medium text-black/40">No localized financial breakdown found for this topic.</div>
+          <div className="text-[10px] text-black/20 mt-1 italic">Financial details may still be available in the 'Standard Portal' documentation.</div>
+        </div>
+      )}
 
       {isLocalLoading ? (
         <div className="mt-4 h-32 animate-pulse rounded-xl border border-black/5 bg-black/5" />
@@ -477,6 +485,7 @@ export default function RunDetailPage()
     {
       const topicId = topicIdFromUrl(row.proposalUrl);
       if (!topicId) continue;
+      
       const arr = map.get(topicId) ?? [];
       arr.push(row);
       map.set(topicId, arr);
@@ -490,11 +499,21 @@ export default function RunDetailPage()
     const rows = localReport?.budgets?.rows ?? [];
     for (const row of rows)
     {
-      const topicKey = row.topicCode || topicIdFromUrl(row.proposalUrl);
-      if (!topicKey) continue;
-      const arr = map.get(topicKey) ?? [];
-      arr.push(row);
-      map.set(topicKey, arr);
+      const topicString = row.topic || "";
+      const foundCodes = Array.from(topicString.matchAll(/(HORIZON-JU-[A-Z0-9-]+)/g)).map(m => m[0]);
+      
+      // Fallback to the single topicCode or proposal URL if no explicit codes found in string
+      if (foundCodes.length === 0) {
+        const fallback = row.topicCode || topicIdFromUrl(row.proposalUrl);
+        if (fallback) foundCodes.push(fallback);
+      }
+
+      // Index this row for every code it mentions
+      for (const code of foundCodes) {
+        const arr = map.get(code) ?? [];
+        arr.push(row);
+        map.set(code, arr);
+      }
     }
     return map;
   }, [localReport]);
@@ -507,6 +526,7 @@ export default function RunDetailPage()
     {
       const topicId = topicIdFromUrl(row.proposalUrl);
       if (!topicId) continue;
+      
       const arr = map.get(topicId) ?? [];
       arr.push(row);
       map.set(topicId, arr);
@@ -639,43 +659,52 @@ export default function RunDetailPage()
               {filtered.map((o, idx) => (
                 (() =>
                 {
-                  const topicKey =
-                    asString(o?.topicCode) || topicIdFromUrl(asString(o?.href)) || "";
-                  const rawBudgetRows = topicKey ? budgetsByTopicCode.get(topicKey) ?? [] : [];
+                  const rawTopicCodeString = asString(o?.topicCode) || "";
+                  // Extract all individual codes that match the schema (HORIZON-JU-...)
+                  const extractedCodes = Array.from(rawTopicCodeString.matchAll(/(HORIZON-JU-[A-Z0-9-]+)/g)).map(m => m[0]);
+                  
+                  // Primary fallback: use the whole string if no schema codes found
+                  if (extractedCodes.length === 0 && rawTopicCodeString.trim()) {
+                    extractedCodes.push(rawTopicCodeString.trim());
+                  }
+                  
+                  // Secondary fallback: use topicId from URL if still empty
+                  if (extractedCodes.length === 0) {
+                    const urlId = topicIdFromUrl(asString(o?.href));
+                    if (urlId) extractedCodes.push(urlId);
+                  }
 
+                  // Gather data for ALL matched topic codes
+                  const rawBudgetRows = extractedCodes.flatMap(code => budgetsByTopicCode.get(code) ?? []);
+                  
                   // Deduplicate budget rows with more robust key
-                  const budgetRowsMap = new Map();
-                  rawBudgetRows.forEach(b =>
-                  {
-                    // Normalize amount for keying (remove whitespace, currency symbols)
+                  const budgetRowsMap = new Map<string, BudgetRow>();
+                  rawBudgetRows.forEach(b => {
                     const normalizedAmt = (b.budgetAmountRaw || "").replace(/[^0-9.]/g, '') || "0";
                     const key = `${b.topicCode || 'main'}-${b.budgetYear}-${normalizedAmt}`;
-                    if (!budgetRowsMap.has(key))
-                    {
+                    if (!budgetRowsMap.has(key)) {
                       budgetRowsMap.set(key, b);
                     }
                   });
                   const budgetRows = Array.from(budgetRowsMap.values());
 
-                  const allAnnexes = topicKey ? annexesByTopicId.get(topicKey) ?? [] : [];
-                  const allDocs = topicKey ? documentsByTopicId.get(topicKey) ?? [] : [];
+                  const allAnnexes = extractedCodes.flatMap(code => annexesByTopicId.get(code) ?? []);
+                  const allDocs = extractedCodes.flatMap(code => documentsByTopicId.get(code) ?? []);
                   const hasData = budgetRows.length > 0 || allAnnexes.length > 0 || allDocs.length > 0;
 
                   // Unified deduplication for all links
                   const allLinks = [...allAnnexes, ...allDocs];
-                  const uniqueLinksMap = new Map();
-                  allLinks.forEach(l =>
-                  {
-                    if (!uniqueLinksMap.has(l.url))
-                    {
+                  const uniqueLinksMap = new Map<string, LinkRow>();
+                  allLinks.forEach(l => {
+                    if (!uniqueLinksMap.has(l.url)) {
                       uniqueLinksMap.set(l.url, l);
                     }
                   });
-                   const uniqueLinks = Array.from(uniqueLinksMap.values());
+                  const uniqueLinks = Array.from(uniqueLinksMap.values());
                   const annexes = uniqueLinks.filter(l => l.kind === 'annex');
                   const documents = uniqueLinks.filter(l => l.kind !== 'annex');
 
-                  const totalBudget = budgetRows.reduce((sum, r) => sum + (r.budgetAmountEUR ?? 0), 0);
+                  const totalBudget = budgetRows.reduce((sum: number, r: BudgetRow) => sum + (r.budgetAmountEUR ?? 0), 0);
 
                   const exportInfo: OpportunityExportInfo | undefined = hasData
                     ? {
@@ -686,14 +715,16 @@ export default function RunDetailPage()
                     }
                     : undefined;
 
+                  const displayKey = extractedCodes[0] || `opportunity-${idx}`;
+
                   return (
                     <OpportunityCard
-                      key={`${topicKey || "opportunity"}-${idx}`}
+                      key={`${displayKey}-${idx}`}
                       opportunity={o}
                       index={idx}
                       exportInfo={exportInfo}
                       budgetRows={budgetRows}
-                       annexes={annexes}
+                      annexes={annexes}
                       documents={documents}
                       runId={runId}
                       isLocalLoading={localReportLoading}
