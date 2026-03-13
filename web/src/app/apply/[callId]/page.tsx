@@ -219,7 +219,7 @@ function ApplyPageContent()
       const draftRef = push(ref(rtdb, "application_drafts"));
       const draftId = draftRef.key;
 
-      const draftData = {
+      const draftData = JSON.parse(JSON.stringify({
         id: draftId,
         callId,
         callMetadata: callData,
@@ -228,7 +228,7 @@ function ApplyPageContent()
         userDocs,
         status: "drafting",
         createdAt: new Date().toISOString(),
-      };
+      }));
 
       await set(draftRef, draftData);
 

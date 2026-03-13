@@ -1,12 +1,98 @@
 import { NextRequest, NextResponse } from "next/server";
 import { get, ref, set } from "firebase/database";
 import { rtdb } from "@/lib/firebase";
-import mammoth from "mammoth";
-const pdf = require("pdf-parse");
+import { getDocumentProxy, extractText } from "unpdf";
+import officeParser from "officeparser";
+import Tesseract from "tesseract.js";
 
 export const runtime = "nodejs";
 
 const PERPLEXITY_API_KEY = (process.env.PERPLEXITY_API_KEY || "").replace(/['"]/g, "").trim();
+
+// Utility for retries
+async function fetchWithRetry(url: string, options: any, retries = 3, timeout = 60000) {
+  for (let i = 0; i < retries; i++) {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    try {
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      clearTimeout(id);
+      if (response.ok) return response;
+      if (response.status >= 500) {
+        console.warn(`Retry ${i + 1}/${retries} due to server error ${response.status}`);
+        continue;
+      }
+      return response; // Return non-retriable error (4xx)
+    } catch (err: any) {
+      clearTimeout(id);
+      if (err.name === 'AbortError') {
+        console.warn(`Retry ${i + 1}/${retries} due to timeout`);
+      } else {
+        console.warn(`Retry ${i + 1}/${retries} due to error: ${err.message}`);
+      }
+      if (i === retries - 1) throw err;
+    }
+  }
+  throw new Error("Max retries reached");
+}
+
+// Text Chunking
+function chunkText(text: string, chunkSize = 4000): string[] {
+  const chunks: string[] = [];
+  let currentPos = 0;
+  while (currentPos < text.length) {
+    let end = currentPos + chunkSize;
+    if (end < text.length) {
+      // Try to find a logical break (paragraph or newline)
+      const nextNewline = text.lastIndexOf("\n", end);
+      if (nextNewline > currentPos + chunkSize * 0.8) {
+        end = nextNewline;
+      }
+    }
+    chunks.push(text.substring(currentPos, end).trim());
+    currentPos = end;
+  }
+  return chunks.filter(c => c.length > 50); // Ignore tiny chunks
+}
+
+// Deterministic Budget Logic
+function generateRuleBasedBudget(totalBudgetStr: string | undefined, participants: any[]) {
+  // Parse budget string: e.g. "€ 10.00 million" -> 10000000
+  let total = 0;
+  if (totalBudgetStr) {
+    const cleaned = totalBudgetStr.replace(/[^0-9.]/g, "");
+    total = parseFloat(cleaned) || 0;
+    if (totalBudgetStr.toLowerCase().includes("million")) {
+      total *= 1000000;
+    }
+  }
+
+  if (total === 0) total = 3000000; // Default fallback for calculation if missing
+
+  const count = participants.length;
+  if (count === 0) return [];
+
+  const coordShare = 0.35;
+  const partnerShare = (1 - coordShare) / (count - 1 || 1);
+
+  return participants.map((p, i) => {
+    const share = i === 0 ? coordShare : partnerShare;
+    const amount = total * share;
+    return {
+      name: p.name,
+      share: (share * 100).toFixed(1) + "%",
+      amountEUR: Math.round(amount),
+      amountFormatted: "€" + (amount / 1000000).toFixed(2) + "M",
+      categories: [
+        { name: "Personnel Costs", share: "65%" },
+        { name: "Subcontracting", share: "10%" },
+        { name: "Travel and Subsistence", share: "5%" },
+        { name: "Equipment & Other Goods", share: "15%" },
+        { name: "Indirect Costs (25%)", share: "5%" }
+      ]
+    };
+  });
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -19,41 +105,65 @@ export async function POST(req: NextRequest) {
     const draft = draftSnap.val();
     const { callMetadata, projectTitle, participants, userDocs } = draft;
 
-    // Extract text from documents if available
-    let documentContext = "";
+    const extractionResults: any[] = [];
+    let combinedContext = "";
+
     if (userDocs && Array.isArray(userDocs)) {
       for (const doc of userDocs) {
         try {
           const buffer = Buffer.from(doc.data.split(",")[1], "base64");
-          let text = "";
+          let extractedText = "";
+          let method = "standard";
+
           if (doc.type === "application/pdf") {
-            const data = await pdf(buffer);
-            text = data.text;
+            const pdfProxy = await getDocumentProxy(new Uint8Array(buffer));
+            const { text } = await extractText(pdfProxy);
+            extractedText = text.join("\n");
+            
+            // Basic OCR Fallback if text is suspiciously short/empty
+            if (extractedText.trim().length < 200) {
+              console.log(`PDF text extraction yielded very little for ${doc.name}, attempting OCR...`);
+              const { data: { text: ocrText } } = await Tesseract.recognize(buffer, "eng");
+              if (ocrText.length > extractedText.length) {
+                extractedText = ocrText;
+                method = "ocr";
+              }
+            }
           } else if (doc.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
-            const data = await mammoth.extractRawText({ buffer });
-            text = data.value;
+            const raw = await officeParser.parseOffice(buffer);
+            extractedText = typeof raw === "string" ? raw : JSON.stringify(raw);
           } else if (doc.type === "text/plain") {
-            text = buffer.toString("utf-8");
+            extractedText = buffer.toString("utf-8");
           }
-          if (text) {
-            documentContext += `\n--- DOCUMENT: ${doc.name} ---\n${text.substring(0, 3000)}\n`;
+
+          if (extractedText) {
+            const chunks = chunkText(extractedText);
+            extractionResults.push({
+              name: doc.name,
+              method,
+              charCount: extractedText.length,
+              chunkCount: chunks.length,
+            });
+            // We only send a limited selection to the AI to prevent context overflow, 
+            // but we process everything for the internal structured output.
+            combinedContext += `\n--- DOCUMENT: ${doc.name} ---\n${extractedText.substring(0, 8000)}\n`;
           }
-        } catch (err) {
-          console.error(`Failed to extract text from ${doc.name}:`, err);
+        } catch (err: any) {
+          console.error(`Failed to extract from ${doc.name}:`, err);
+          extractionResults.push({ name: doc.name, error: err.message });
         }
       }
     }
 
     if (!PERPLEXITY_API_KEY) {
-      console.log("No Perplexity API Key found, using mock mode.");
-      const mockResult = generateMockAnalysis(draft);
-      await set(ref(rtdb, `application_drafts/${draftId}/analysis`), mockResult);
-      await set(ref(rtdb, `application_drafts/${draftId}/status`), "completed");
-      return NextResponse.json({ success: true, mocked: true });
+      return NextResponse.json({ error: "PERPLEXITY_API_KEY is not configured. Live AI integration required." }, { status: 500 });
     }
 
-    const prompt = `You are an expert EU funding consultant. I have an Application Draft for a funding call. 
-Please analyze the call and the consortium to generate a structured application proposal.
+    // Rule-Based Budget
+    const ruleBudget = generateRuleBasedBudget(callMetadata?.budget, participants || []);
+
+    const prompt = `You are an expert EU funding consultant. Analyze the following and generate a structured application proposal.
+IMPORTANT: The budget calculations have been pre-determined by the system. Use the provided budget figures exactly as they are. Your role is to phrase the narrative around why this budget is appropriate for the proposed work.
 
 CALL INFO:
 Topic ID: ${callMetadata?.topicCode}
@@ -61,48 +171,25 @@ Title: ${callMetadata?.title}
 Programme: ${callMetadata?.programme}
 Deadline: ${callMetadata?.deadline}
 Action Type: ${callMetadata?.typeOfAction}
-Total Call Budget: ${callMetadata?.budget}
 
 CONSORTIUM:
 ${participants.map((p: any) => `- Name: ${p.name}, Info: ${p.description}`).join('\n')}
 
-PROJECT TITLE PROPOSAL: ${projectTitle || "Generate one based on the call and consortium"}
+DETERMINISTIC BUDGET SHARE (USE THESE FIGURES):
+${ruleBudget.map(b => `- ${b.name}: ${b.share} (${b.amountFormatted})`).join('\n')}
 
-${documentContext ? `EXTRA CONTEXT FROM UPLOADED DOCUMENTS:\n${documentContext}\n` : ""}
+DOCUMENT CONTEXT (EXCERPTS):
+${combinedContext}
 
-Please generate the following sections in a structured way:
-1. Consortium & Roles: For each participant, propose:
-   - Role (e.g. coordinator, WP leader, technical partner, pilot site, exploitation partner).
-   - Main responsibilities.
-   - Indicative effort (e.g. relative percentage of work or indicative person-months).
+FORMAT: Return ONLY a JSON object with strictly these keys: "consortium_roles", "part_a", "budget_narrative", "part_b".
+- "consortium_roles": Array of objects { name, role, responsibilities, effort }.
+- "part_a": Object { title, objectives, concept, value_added }.
+- "budget_narrative": Detailed qualitative explanation of the budget per partner, referencing the shares provided.
+- "part_b": Object with keys for "description", "impact", "innovation", "methodology", "consortium_description", "risks", "dissemination".
 
-2. Part A – short project description:
-   - Project title (if AI-generated).
-   - Objectives.
-   - High-level concept and approach.
-   - Summary of consortium composition and added value.
+Do not return any other text or markdown.`;
 
-3. Budget Proposal per Partner: For each participant:
-   - Indicative budget share (percentage of total and estimated amount in EUR).
-   - High-level cost categories (personnel, subcontracting, travel, equipment, etc.).
-   - Guided by the call's max budget and number of partners.
-
-4. Part B – detailed project description:
-   - Project description and objectives.
-   - Impact (expected outcomes, target stakeholders, alignment with EU policies).
-   - Innovation (state-of-the-art, novelty, added value).
-   - Methodology and work plan: key work packages (WP1-WP5), tasks, deliverables, milestones, and timeline overview.
-   - Consortium description: roles and competences of each partner, why this consortium is fit.
-   - Budget narrative: qualitative explanation of major cost items and resource allocation.
-   - Risks and mitigation measures.
-   - Dissemination, communication, and exploitation plan.
-
-FORMAT: Return ONLY a JSON object with strictly these keys: "consortium_roles", "part_a", "budget", "part_b". 
-Current "part_b" should be an object containing sub-keys for each bullet point above.`;
-
-    console.log("Sending request to Perplexity API...");
-
-    const response = await fetch("https://api.perplexity.ai/chat/completions", {
+    const response = await fetchWithRetry("https://api.perplexity.ai/chat/completions", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${PERPLEXITY_API_KEY}`,
@@ -113,83 +200,48 @@ Current "part_b" should be an object containing sub-keys for each bullet point a
         messages: [
           { role: "system", content: "You are an expert EU Horizon Europe grant writer. Return ONLY a valid JSON object. Do not include any markdown formatting or backticks around the JSON." },
           { role: "user", content: prompt }
-        ]
+        ],
+        temperature: 0.2
       }),
     });
 
-    console.log("Perplexity Request Status:", response.status);
-
     if (!response.ok) {
       const errorBody = await response.text();
-      console.error("Perplexity Error Body:", errorBody);
-      try {
-        const errorData = JSON.parse(errorBody);
-        throw new Error(`Perplexity API Error: ${JSON.stringify(errorData)}`);
-      } catch {
-        throw new Error(`Perplexity API Error (${response.status}): ${errorBody}`);
-      }
+      throw new Error(`AI Gateway Error (${response.status}): ${errorBody}`);
     }
 
-    const result = await response.json();
-    console.log("Perplexity Response Received successfully.");
-
-    let content;
+    const aiData = await response.json();
+    let aiContent;
     try {
-      let rawContent = result.choices[0].message.content.trim();
-      // Handle the case where AI wraps JSON in markdown backticks
-      if (rawContent.startsWith("```json")) {
-        rawContent = rawContent.replace(/^```json/, "").replace(/```$/, "").trim();
-      } else if (rawContent.startsWith("```")) {
-        rawContent = rawContent.replace(/^```/, "").replace(/```$/, "").trim();
-      }
-      content = JSON.parse(rawContent);
+      let raw = aiData.choices[0].message.content.trim();
+      if (raw.startsWith("```json")) raw = raw.replace(/^```json/, "").replace(/```$/, "").trim();
+      else if (raw.startsWith("```")) raw = raw.replace(/^```/, "").replace(/```$/, "").trim();
+      aiContent = JSON.parse(raw);
     } catch (e) {
-      console.error("Failed to parse Perplexity JSON content:", result.choices[0].message.content);
-      throw new Error("AI returned invalid JSON format. Please try again.");
+      throw new Error(`AI returned malformed JSON: ${aiData.choices[0].message.content}`);
     }
 
-    // Save back to Firebase
-    await set(ref(rtdb, `application_drafts/${draftId}/analysis`), content);
+    // Merge everything into final report
+    const finalAnalysis = {
+      ...aiContent,
+      budget: ruleBudget, // Use our deterministic budget
+      metadata: {
+        generatedAt: new Date().toISOString(),
+        extraction: extractionResults,
+        callId: callMetadata?.topicCode
+      }
+    };
+
+    await set(ref(rtdb, `application_drafts/${draftId}/analysis`), finalAnalysis);
     await set(ref(rtdb, `application_drafts/${draftId}/status`), "completed");
 
-    return NextResponse.json({ success: true, data: content });
+    return NextResponse.json({ success: true, extraction: extractionResults });
 
-  } catch (e) {
-    console.error("Analysis Pipeline Error:", e);
-    return NextResponse.json({ error: (e as Error).message }, { status: 500 });
+  } catch (e: any) {
+    console.error("Analysis Pipeline Exception:", e);
+    return NextResponse.json({ 
+      error: e.message,
+      status: "failed"
+    }, { status: 500 });
   }
-}
-
-function generateMockAnalysis(draft: any) {
-  const { participants, callMetadata } = draft;
-  return {
-    consortium_roles: participants.map((p: any, i: number) => ({
-      name: p.name,
-      role: i === 0 ? "Coordinator" : "Technical Partner",
-      responsibilities: "Leading primary research and development of the core platform.",
-      effort: "15 PM"
-    })),
-    part_a: {
-      title: draft.projectTitle || "SMART-EU " + callMetadata?.topicCode,
-      objectives: "To revolutionize the way data is handled in this sector through innovative blockchain and AI technologies.",
-      concept: "A distributed ledger system that ensures transparency and efficiency across the entire value chain.",
-      value: "This consortium brings together world-class research institutes and industry leaders."
-    },
-    budget: participants.map((p: any, i: number) => ({
-      name: p.name,
-      share: i === 0 ? "40%" : "30%",
-      amount: "€1.2M",
-      categories: ["Personnel", "Travel", "Equipment"]
-    })),
-    part_b: {
-      description: "Detailed description of the project aims and technical feasibility.",
-      impact: "Significant reduction in operational costs and carbon footprint.",
-      innovation: "State-of-the-art AI integration for real-time optimization.",
-      methodology: "Agile development with iterative pilots across 3 EU countries.",
-      consortium: "A balanced mix of academic rigor and industrial scale.",
-      budget_narrative: "Resource allocation is weighted towards key technical developments.",
-      risks: "Potential delays in hardware supply chain (mitigated by multiple vendors).",
-      dissemination: "Dedicated website, social media, and 5 peer-reviewed publications."
-    }
-  };
 }

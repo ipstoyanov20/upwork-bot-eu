@@ -277,13 +277,14 @@ function ApplicationReviewContent()
                       <tr key={i} className="border-b border-black/5 last:border-b-0 hover:bg-black/[0.01]">
                         <td className="px-4 py-4 font-medium text-sm">{b.name}</td>
                         <td className="px-4 py-4 text-sm font-mono">{b.share}</td>
-                        <td className="px-4 py-4 text-sm font-mono font-bold text-emerald-700">{b.amount}</td>
+                        <td className="px-4 py-4 text-sm font-mono font-bold text-emerald-700">{b.amountFormatted || b.amount}</td>
                         <td className="px-4 py-4 text-sm">
-                          <div className="flex flex-wrap gap-1">
-                            {ensureArray(b.categories).map((c: string, j: number) => (
-                              <span key={j} className="rounded bg-black/5 px-1.5 py-0.5 text-[10px] font-semibold text-black/60 uppercase">
-                                {c}
-                              </span>
+                          <div className="flex flex-col gap-1">
+                            {ensureArray(b.categories).map((c: any, j: number) => (
+                              <div key={j} className="flex items-center justify-between gap-4 text-[10px]">
+                                <span className="font-semibold text-black/60 uppercase">{typeof c === 'string' ? c : c.name}</span>
+                                <span className="font-mono text-black/40">{typeof c === 'string' ? '' : c.share}</span>
+                              </div>
                             ))}
                           </div>
                         </td>

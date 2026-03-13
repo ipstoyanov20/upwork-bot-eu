@@ -14,9 +14,12 @@
     "firebase": "^12.9.0",
     "mammoth": "^1.11.0",
     "next": "16.1.6",
+    "officeparser": "^6.0.4",
     "pdf-parse": "^2.4.5",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "tesseract.js": "^7.0.0",
+    "unpdf": "^1.4.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
