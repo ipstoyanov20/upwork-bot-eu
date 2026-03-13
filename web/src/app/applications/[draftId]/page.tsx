@@ -50,7 +50,8 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
 function SmartRender({ content }: { content: any }) {
   if (!content) return null;
   if (typeof content === "string") {
-    return <span className="whitespace-pre-wrap">{content}</span>;
+    const cleaned = content.replace(/\[\d+\]/g, "");
+    return <span className="whitespace-pre-wrap">{cleaned}</span>;
   }
   if (Array.isArray(content)) {
     return (
@@ -91,6 +92,7 @@ function ApplicationReviewContent() {
   const [isEditing, setIsEditing] = useState(false);
   const [editableAnalysis, setEditableAnalysis] = useState<any>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [showVersions, setShowVersions] = useState(false);
 
   const reportRef = useRef<HTMLDivElement>(null);
 
@@ -131,7 +133,9 @@ function ApplicationReviewContent() {
     setIsSaving(true);
     try {
       await update(ref(rtdb, `application_drafts/${draftId}`), {
-        analysis: editableAnalysis
+        analysis: editableAnalysis,
+        activeVersionId: 'custom',
+        activeVersionLabel: 'Manual Edits'
       });
       setIsEditing(false);
     } catch (e: any) {
@@ -168,7 +172,9 @@ function ApplicationReviewContent() {
     setIsSaving(true);
     try {
       await update(ref(rtdb, `application_drafts/${draftId}`), {
-        analysis: version.analysis
+        analysis: version.analysis,
+        activeVersionId: version.id,
+        activeVersionLabel: version.label
       });
       setActiveTab("consortium");
     } catch (e: any) {
@@ -230,22 +236,24 @@ function ApplicationReviewContent() {
                 {status}
               </span>
               <span>Topic: <code className="font-mono text-xs">{callMetadata?.topicCode}</code></span>
+              {draft.activeVersionLabel && (
+                <>
+                  <span>•</span>
+                  <span className="inline-flex items-center gap-1 rounded bg-black/5 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-black/40">
+                    <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    {draft.activeVersionLabel}
+                  </span>
+                </>
+              )}
               {versions.length > 0 && (
                 <div className="flex items-center gap-2">
                   <span>•</span>
-                  <select 
-                    onChange={(e) => {
-                      const v = versions.find(v => v.id === e.target.value);
-                      if (v) rollbackToVersion(v);
-                    }}
-                    className="bg-transparent text-xs font-semibold text-emerald-600 cursor-pointer outline-none hover:underline"
-                    value=""
+                  <button 
+                    onClick={() => setShowVersions(true)}
+                    className="text-xs font-semibold text-emerald-600 hover:underline flex items-center gap-1"
                   >
-                    <option value="" disabled>Version History ({versions.length})</option>
-                    {versions.map((v) => (
-                      <option key={v.id} value={v.id}>{v.label} ({new Date(v.timestamp).toLocaleDateString()})</option>
-                    ))}
-                  </select>
+                    View History ({versions.length})
+                  </button>
                 </div>
               )}
             </div>
@@ -414,7 +422,7 @@ function ApplicationReviewContent() {
           {activeTab === "partA" && (
             <section className="animate-in fade-in slide-in-from-bottom-2 duration-300 space-y-8">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold">Part A: Project Summary</h2>
+                <h2 className="text-xl font-bold">Project Summary</h2>
                 <CopyButton text={JSON.stringify(analysis?.part_a, null, 2)} label="Copy Summary" />
               </div>
               <div className="space-y-6">
@@ -561,14 +569,14 @@ function ApplicationReviewContent() {
           {activeTab === "partB" && (
             <section className="animate-in fade-in slide-in-from-bottom-2 duration-300 space-y-8 pb-10">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-xl font-bold">Part B: Detailed Project Description</h2>
+                <h2 className="text-xl font-bold">Detailed Project Description</h2>
                 <CopyButton text={JSON.stringify(analysis?.part_b, null, 2)} label="Copy Everything" />
               </div>
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-10">
                 <div className="md:col-span-2 space-y-1 bg-emerald-50/30 -mx-8 px-8 py-6 mb-4 border-y border-black/5">
                   <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-sm font-bold uppercase tracking-wider text-emerald-800">0. Project Description and Objectives</h3>
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-emerald-800">Project Description and Objectives</h3>
                     <CopyButton text={analysis?.part_b?.description || analysis?.part_b?.objectives || ""} />
                   </div>
                   {isEditing ? (
@@ -589,14 +597,14 @@ function ApplicationReviewContent() {
                 </div>
 
                 {[
-                  { key: "impact", title: "1. Impact" },
-                  { key: "innovation", title: "2. Innovation" },
-                  { key: "methodology", title: "3. Methodology" },
-                  { key: "consortium_description", title: "4. Consortium Fit" },
-                  { key: "budget_narrative", title: "5. Budget Narrative" },
-                  { key: "risks", title: "6. Risks & Mitigation" },
-                  { key: "dissemination", title: "7. Dissemination & Exploitation" }
-                ].map((item) => (
+                  { key: "impact", title: "Impact" },
+                  { key: "innovation", title: "Innovation" },
+                  { key: "methodology", title: "Methodology" },
+                  { key: "consortium_description", title: "Consortium Fit" },
+                  { key: "budget_narrative", title: "Budget Narrative" },
+                  { key: "risks", title: "Risks & Mitigation" },
+                  { key: "dissemination", title: "Dissemination & Exploitation" }
+                ].filter(item => isEditing || (analysis?.part_b?.[item.key] && String(analysis.part_b[item.key]).trim().length > 0)).map((item) => (
                   <div key={item.key} className="space-y-1">
                     <div className="flex items-center justify-between border-b border-black/5 pb-1 mb-3 bg-black/[0.02] -mx-4 px-4 py-1">
                       <h3 className="text-sm font-bold">{item.title}</h3>
@@ -631,7 +639,7 @@ function ApplicationReviewContent() {
           
           <div className="space-y-12">
             <section>
-              <h2 className="text-2xl font-bold border-b-2 border-emerald-600 pb-2 mb-6">1. Consortium & Roles</h2>
+              <h2 className="text-2xl font-bold border-b-2 border-emerald-600 pb-2 mb-6">Consortium & Roles</h2>
               <div className="space-y-6">
                 {ensureArray(analysis?.consortium_roles).map((p: any, i: number) => (
                   <div key={i} className="border border-black/10 p-4 rounded-xl">
@@ -644,25 +652,31 @@ function ApplicationReviewContent() {
             </section>
 
             <section>
-              <h2 className="text-2xl font-bold border-b-2 border-emerald-600 pb-2 mb-6">2. Project Summary (Part A)</h2>
+              <h2 className="text-2xl font-bold border-b-2 border-emerald-600 pb-2 mb-6">Project Summary</h2>
               <div className="space-y-6">
-                <div>
-                  <h3 className="font-bold text-xs uppercase opacity-40">Objectives</h3>
-                  <div className="text-sm mt-1"><SmartRender content={analysis?.part_a?.objectives} /></div>
-                </div>
-                <div>
-                  <h3 className="font-bold text-xs uppercase opacity-40">Concept & Approach</h3>
-                  <div className="text-sm mt-1"><SmartRender content={analysis?.part_a?.concept} /></div>
-                </div>
-                <div>
-                  <h3 className="font-bold text-xs uppercase opacity-40">Consortium Added Value</h3>
-                  <div className="text-sm mt-1"><SmartRender content={analysis?.part_a?.value} /></div>
-                </div>
+                {analysis?.part_a?.objectives && (
+                  <div>
+                    <h3 className="font-bold text-xs uppercase opacity-40">Objectives</h3>
+                    <div className="text-sm mt-1"><SmartRender content={analysis?.part_a?.objectives} /></div>
+                  </div>
+                )}
+                {analysis?.part_a?.concept && (
+                  <div>
+                    <h3 className="font-bold text-xs uppercase opacity-40">Concept & Approach</h3>
+                    <div className="text-sm mt-1"><SmartRender content={analysis?.part_a?.concept} /></div>
+                  </div>
+                )}
+                {analysis?.part_a?.value && (
+                  <div>
+                    <h3 className="font-bold text-xs uppercase opacity-40">Consortium Added Value</h3>
+                    <div className="text-sm mt-1"><SmartRender content={analysis?.part_a?.value} /></div>
+                  </div>
+                )}
               </div>
             </section>
 
             <section className="page-break-before-always">
-              <h2 className="text-2xl font-bold border-b-2 border-emerald-600 pb-2 mb-6">3. Budget Allocation</h2>
+              <h2 className="text-2xl font-bold border-b-2 border-emerald-600 pb-2 mb-6">Budget Allocation</h2>
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="border-b border-black/20">
@@ -684,28 +698,111 @@ function ApplicationReviewContent() {
             </section>
 
             <section>
-              <h2 className="text-2xl font-bold border-b-2 border-emerald-600 pb-2 mb-6">4. Detailed Proposal (Part B)</h2>
+              <h2 className="text-2xl font-bold border-b-2 border-emerald-600 pb-2 mb-6">Detailed Proposal</h2>
               <div className="space-y-8">
-                <div>
-                  <h3 className="font-bold text-xs uppercase opacity-40">Impact</h3>
-                  <div className="text-sm mt-1"><SmartRender content={analysis?.part_b?.impact} /></div>
-                </div>
-                <div>
-                  <h3 className="font-bold text-xs uppercase opacity-40">Innovation</h3>
-                  <div className="text-sm mt-1"><SmartRender content={analysis?.part_b?.innovation} /></div>
-                </div>
-                <div>
-                  <h3 className="font-bold text-xs uppercase opacity-40">Methodology</h3>
-                  <div className="text-sm mt-1"><SmartRender content={analysis?.part_b?.methodology} /></div>
-                </div>
-                <div>
-                  <h3 className="font-bold text-xs uppercase opacity-40">Budget Narrative</h3>
-                  <div className="text-sm mt-1"><SmartRender content={analysis?.part_b?.budget_narrative} /></div>
-                </div>
+                {analysis?.part_b?.impact && (
+                  <div>
+                    <h3 className="font-bold text-xs uppercase opacity-40">Impact</h3>
+                    <div className="text-sm mt-1"><SmartRender content={analysis?.part_b?.impact} /></div>
+                  </div>
+                )}
+                {analysis?.part_b?.innovation && (
+                  <div>
+                    <h3 className="font-bold text-xs uppercase opacity-40">Innovation</h3>
+                    <div className="text-sm mt-1"><SmartRender content={analysis?.part_b?.innovation} /></div>
+                  </div>
+                )}
+                {analysis?.part_b?.methodology && (
+                  <div>
+                    <h3 className="font-bold text-xs uppercase opacity-40">Methodology</h3>
+                    <div className="text-sm mt-1"><SmartRender content={analysis?.part_b?.methodology} /></div>
+                  </div>
+                )}
+                {analysis?.part_b?.budget_narrative && (
+                  <div>
+                    <h3 className="font-bold text-xs uppercase opacity-40">Budget Narrative</h3>
+                    <div className="text-sm mt-1"><SmartRender content={analysis?.part_b?.budget_narrative} /></div>
+                  </div>
+                )}
+                {analysis?.part_b?.risks && (
+                  <div>
+                    <h3 className="font-bold text-xs uppercase opacity-40">Risks & Mitigation</h3>
+                    <div className="text-sm mt-1"><SmartRender content={analysis?.part_b?.risks} /></div>
+                  </div>
+                )}
+                {analysis?.part_b?.dissemination && (
+                  <div>
+                    <h3 className="font-bold text-xs uppercase opacity-40">Dissemination, Communication & Exploitation</h3>
+                    <div className="text-sm mt-1"><SmartRender content={analysis?.part_b?.dissemination} /></div>
+                  </div>
+                )}
               </div>
             </section>
           </div>
         </div>
+
+        {/* Version History Side Panel */}
+        {showVersions && (
+          <div className="fixed inset-0 z-50 flex justify-end">
+            <div className="absolute inset-0 bg-black/20 backdrop-blur-sm" onClick={() => setShowVersions(false)} />
+            <div className="relative w-full max-w-sm bg-white shadow-2xl animate-in slide-in-from-right duration-300 flex flex-col">
+              <div className="p-6 border-b border-black/10 flex items-center justify-between">
+                <h2 className="text-lg font-bold">Version History</h2>
+                <button onClick={() => setShowVersions(false)} className="text-black/40 hover:text-black">
+                  <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                <div 
+                  className="p-4 rounded-xl border-2 border-emerald-500 bg-emerald-50 flex flex-col gap-2"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-emerald-700 uppercase">Live Version</span>
+                    <span className="text-[10px] text-emerald-600 font-mono">Current</span>
+                  </div>
+                  <h3 className="font-bold">Active Draft</h3>
+                  <p className="text-xs text-black/60 italic">This is what you are currently viewing and editing.</p>
+                </div>
+
+                {versions.map((v) => {
+                  const isActive = draft?.activeVersionId === v.id;
+                  return (
+                    <div 
+                      key={v.id} 
+                      className={`p-4 rounded-xl border transition group ${
+                        isActive ? "border-emerald-500 bg-emerald-50/50 ring-1 ring-emerald-500" : "border-black/10 bg-white hover:border-black/20"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] font-bold text-black/30 uppercase">{new Date(v.timestamp).toLocaleString()}</span>
+                        {isActive && <span className="text-[10px] font-bold text-emerald-600 uppercase bg-emerald-100 px-1.5 py-0.5 rounded">Active</span>}
+                      </div>
+                      <h3 className="font-bold mb-3">{v.label}</h3>
+                      {!isActive && (
+                        <button 
+                          onClick={() => {
+                            rollbackToVersion(v);
+                            setShowVersions(false);
+                          }}
+                          className="w-full py-2 text-xs font-bold bg-black text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          Restore this Version
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {versions.length === 0 && (
+                  <div className="text-center py-20">
+                    <div className="text-black/20 mb-2">No versions saved yet</div>
+                    <p className="text-xs text-black/40">Use the "Snapshot" button to save your current work.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

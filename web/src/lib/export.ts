@@ -20,14 +20,20 @@ export async function exportToDocx(analysis: any, callMetadata: any) {
             spacing: { after: 400 },
           }),
 
-          // PART A
-          new Paragraph({ text: "Part A: Project Summary", heading: HeadingLevel.HEADING_1, spacing: { before: 400, after: 200 } }),
-          new Paragraph({ text: "Objectives", heading: HeadingLevel.HEADING_2 }),
-          new Paragraph({ text: String(analysis.part_a?.objectives || ""), spacing: { after: 200 } }),
-          new Paragraph({ text: "Concept & Approach", heading: HeadingLevel.HEADING_2 }),
-          new Paragraph({ text: String(analysis.part_a?.concept || ""), spacing: { after: 200 } }),
-          new Paragraph({ text: "Consortium Added Value", heading: HeadingLevel.HEADING_2 }),
-          new Paragraph({ text: String(analysis.part_a?.value || ""), spacing: { after: 200 } }),
+          // PART A (Summary)
+          new Paragraph({ text: "Project Summary", heading: HeadingLevel.HEADING_1, spacing: { before: 400, after: 200 } }),
+          ...(analysis.part_a?.objectives ? [
+            new Paragraph({ text: "Objectives", heading: HeadingLevel.HEADING_2 }),
+            new Paragraph({ text: String(analysis.part_a.objectives), spacing: { after: 200 } })
+          ] : []),
+          ...(analysis.part_a?.concept ? [
+            new Paragraph({ text: "Concept & Approach", heading: HeadingLevel.HEADING_2 }),
+            new Paragraph({ text: String(analysis.part_a.concept), spacing: { after: 200 } })
+          ] : []),
+          ...(analysis.part_a?.value ? [
+            new Paragraph({ text: "Consortium Added Value", heading: HeadingLevel.HEADING_2 }),
+            new Paragraph({ text: String(analysis.part_a.value), spacing: { after: 200 } })
+          ] : []),
 
           // CONSORTIUM
           new Paragraph({ text: "Consortium & Roles", heading: HeadingLevel.HEADING_1, spacing: { before: 400, after: 200 } }),
@@ -68,9 +74,9 @@ export async function exportToDocx(analysis: any, callMetadata: any) {
             ]
           }),
 
-          // PART B
-          new Paragraph({ text: "Part B: Detailed Project Description", heading: HeadingLevel.HEADING_1, spacing: { before: 400, after: 200 } }),
-          ...Object.entries(analysis.part_b || {}).map(([key, value]) => [
+          // PART B (Detailed)
+          new Paragraph({ text: "Detailed Project Description", heading: HeadingLevel.HEADING_1, spacing: { before: 400, after: 200 } }),
+          ...Object.entries(analysis.part_b || {}).filter(([_, value]) => value && String(value).trim().length > 0).map(([key, value]) => [
             new Paragraph({ text: key.replace(/_/g, ' ').toUpperCase(), heading: HeadingLevel.HEADING_2, spacing: { before: 200 } }),
             new Paragraph({ text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }),
           ]).flat()

@@ -218,8 +218,24 @@ Do not return any other text or markdown.`;
       else if (raw.startsWith("```")) raw = raw.replace(/^```/, "").replace(/```$/, "").trim();
       aiContent = JSON.parse(raw);
     } catch (e) {
-      throw new Error(`AI returned malformed JSON: ${aiData.choices[0].message.content}`);
+      console.error("AI JSON Parse Error:", e, aiData.choices[0].message.content);
+      throw new Error(`AI returned malformed JSON: ${aiData.choices[0].message.content.substring(0, 100)}...`);
     }
+
+    const cleanCitations = (obj: any): any => {
+      if (typeof obj === 'string') return obj.replace(/\[\d+\]/g, "");
+      if (Array.isArray(obj)) return obj.map(cleanCitations);
+      if (obj && typeof obj === 'object') {
+        const cleaned: any = {};
+        for (const key in obj) {
+          cleaned[key] = cleanCitations(obj[key]);
+        }
+        return cleaned;
+      }
+      return obj;
+    };
+
+    aiContent = cleanCitations(aiContent);
 
     // Merge everything into final report
     const finalAnalysis = {
