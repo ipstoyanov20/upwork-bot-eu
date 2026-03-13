@@ -29,3 +29,40 @@ body {
 ::selection {
   background: color-mix(in srgb, var(--accent) 24%, transparent);
 }
+
+@media print {
+  /* Hide navigation, buttons, and other non-report UI */
+  header, 
+  nav, 
+  button, 
+  footer,
+  main,
+  .no-print {
+    display: none !important;
+  }
+
+  body {
+    background: white !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Ensure the print view shown via print:block is visible */
+  #print-view {
+    display: block !important;
+    opacity: 1 !important;
+  }
+
+  /* Force colors to show in PDF */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Page breaks */
+  section {
+    page-break-inside: avoid;
+    break-inside: avoid;
+    margin-bottom: 2rem;
+  }
+}

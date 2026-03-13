@@ -62,7 +62,7 @@ export async function exportToDocx(analysis: any, callMetadata: any) {
                 children: [
                    new TableCell({ children: [new Paragraph(b.name || "")] }),
                    new TableCell({ children: [new Paragraph(b.share || "")] }),
-                   new TableCell({ children: [new Paragraph(b.amount || "")] }),
+                   new TableCell({ children: [new Paragraph(b.amountFormatted || b.amount || "")] }),
                 ]
               }))
             ]
