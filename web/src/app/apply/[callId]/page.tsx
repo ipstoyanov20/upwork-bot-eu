@@ -43,6 +43,20 @@ function ApplyPageContent()
   ]);
   const [userDocs, setUserDocs] = useState<{ name: string; type: string; size: number; data: string }[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isDirty && !isSubmitting) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [isDirty, isSubmitting]);
+
+  const markDirty = () => !isDirty && setIsDirty(true);
 
   useEffect(() =>
   {
@@ -151,10 +165,7 @@ function ApplyPageContent()
     if (participants.length <= 3) return;
     setParticipants(participants.filter((_, i) => i !== index));
   };
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
-
+  const processFiles = async (files: FileList | File[]) => {
     for (const file of Array.from(files)) {
       const reader = new FileReader();
       reader.onload = (event) => {
@@ -165,9 +176,26 @@ function ApplyPageContent()
           size: file.size,
           data: base64
         }]);
+        markDirty();
       };
       reader.readAsDataURL(file);
     }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) processFiles(e.target.files);
+  };
+
+  const [isDragging, setIsDragging] = useState(false);
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+  const handleDragLeave = () => setIsDragging(false);
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer.files) processFiles(e.dataTransfer.files);
   };
 
   const removeDocument = (index: number) => {
@@ -253,30 +281,54 @@ function ApplyPageContent()
           {/* Call Metadata (Read-only) */}
           <section className="rounded-2xl border border-black/10 bg-white/50 p-6 backdrop-blur">
             <h2 className="text-lg font-semibold mb-4">Call Details</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-black/40">Topic ID</label>
-                <div className="mt-1 text-sm font-mono">{callData?.topicCode}</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
+              <div className="space-y-1">
+                <label className="block text-[10px] font-bold uppercase tracking-widest text-black/30">Topic ID</label>
+                <div className="rounded-xl border border-black/5 bg-black/[0.03] px-4 py-2.5 font-mono text-sm shadow-inner">
+                  {callData?.topicCode}
+                </div>
               </div>
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-black/40">Programme</label>
-                <div className="mt-1 text-sm">{callData?.programme}</div>
+              <div className="space-y-1">
+                <label className="block text-[10px] font-bold uppercase tracking-widest text-black/30">Programme</label>
+                <div className="rounded-xl border border-black/5 bg-black/[0.03] px-4 py-2.5 text-sm font-medium shadow-inner">
+                  {callData?.programme}
+                </div>
               </div>
-              <div className="md:col-span-2">
-                <label className="block text-xs font-bold uppercase tracking-wider text-black/40">Call Title</label>
-                <div className="mt-1 text-sm font-medium">{callData?.title}</div>
+              <div className="md:col-span-2 space-y-1">
+                <label className="block text-[10px] font-bold uppercase tracking-widest text-black/30">Call Title</label>
+                <div className="rounded-xl border border-black/5 bg-black/[0.03] px-4 py-2.5 text-sm font-semibold leading-relaxed shadow-inner">
+                  {callData?.title}
+                </div>
               </div>
               {callData?.deadline && (
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-black/40">Deadline</label>
-                  <div className="mt-1 text-sm">{callData.deadline}</div>
+                <div className="space-y-1">
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-black/30">Deadline</label>
+                  <div className="rounded-xl border border-rose-100 bg-rose-50/30 px-4 py-2.5 text-sm font-bold text-rose-900 shadow-inner">
+                    {callData.deadline}
+                  </div>
+                </div>
+              )}
+              {callData?.budget && (
+                <div className="space-y-1">
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-black/30">Indicative Budget</label>
+                  <div className="rounded-xl border border-emerald-100 bg-emerald-50/30 px-4 py-2.5 text-sm font-bold text-emerald-900 shadow-inner">
+                    {callData.budget}
+                  </div>
                 </div>
               )}
               {callData?.href && (
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-bold uppercase tracking-wider text-black/40">Call Link</label>
-                  <a href={callData.href} target="_blank" rel="noopener" className="mt-1 block text-sm text-emerald-700 underline underline-offset-2 break-all">
-                    {callData.href}
+                <div className="md:col-span-2 space-y-1">
+                  <label className="block text-[10px] font-bold uppercase tracking-widest text-black/30">Portal Reference</label>
+                  <a 
+                    href={callData.href} 
+                    target="_blank" 
+                    rel="noopener" 
+                    className="flex items-center justify-between rounded-xl border border-black/5 bg-black/[0.03] px-4 py-2.5 text-xs text-emerald-700 hover:bg-emerald-50 transition shadow-inner group"
+                  >
+                    <span className="truncate font-mono mr-4">{callData.href}</span>
+                    <svg className="h-4 w-4 flex-shrink-0 opacity-40 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
                   </a>
                 </div>
               )}
@@ -308,7 +360,7 @@ function ApplyPageContent()
             <input
               type="text"
               value={projectTitle}
-              onChange={(e) => setProjectTitle(e.target.value)}
+              onChange={(e) => { setProjectTitle(e.target.value); markDirty(); }}
               placeholder="e.g. AI-driven Smart Energy Management System"
               className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-sm outline-none focus:border-emerald-500/50 focus:ring-4 focus:ring-emerald-500/5 transition"
             />
@@ -337,7 +389,7 @@ function ApplyPageContent()
                         type="text"
                         required={idx < 3}
                         value={p.name}
-                        onChange={(e) => updateParticipant(idx, "name", e.target.value)}
+                        onChange={(e) => { updateParticipant(idx, "name", e.target.value); markDirty(); }}
                         placeholder="Organization Name"
                         className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/5 transition"
                       />
@@ -347,7 +399,7 @@ function ApplyPageContent()
                       <input
                         type="text"
                         value={p.description}
-                        onChange={(e) => updateParticipant(idx, "description", e.target.value)}
+                        onChange={(e) => { updateParticipant(idx, "description", e.target.value); markDirty(); }}
                         placeholder="https://example.com or Short blurb"
                         className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500/50 focus:ring-2 focus:ring-emerald-500/5 transition"
                       />
@@ -374,8 +426,21 @@ function ApplyPageContent()
           <section className="rounded-2xl border border-black/10 bg-white p-6 shadow-sm">
             <h2 className="text-lg font-semibold mb-4">Supporting Documentation (Optional)</h2>
             <div className="space-y-4">
-              <div className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-black/10 p-8 bg-black/[0.01]">
-                <p className="text-sm text-black/40 mb-4 text-center">Upload relevant documents like partner CVs, previous proposals, or technical notes.</p>
+              <div 
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+                className={`flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-8 transition ${
+                  isDragging 
+                    ? "border-emerald-500 bg-emerald-50/50 scale-[1.01]" 
+                    : "border-black/10 bg-black/[0.01]"
+                }`}
+              >
+                <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-black/5 text-black/20">
+                  <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
+                </div>
+                <p className="text-sm text-black/60 font-medium mb-1">Drag and drop files here</p>
+                <p className="text-xs text-black/30 mb-4 text-center">or click below to browse (PDF, DOCX, TXT)</p>
                 <input
                   type="file"
                   multiple
@@ -386,9 +451,9 @@ function ApplyPageContent()
                 />
                 <label
                   htmlFor="file-upload"
-                  className="rounded-lg bg-black text-white px-6 py-2 text-sm font-bold cursor-pointer hover:bg-black/80 transition"
+                  className="rounded-xl bg-black px-6 py-2.5 text-xs font-bold text-white cursor-pointer hover:bg-black/80 transition shadow-sm active:scale-95"
                 >
-                  Add Document
+                  Choose Files
                 </label>
               </div>
 
