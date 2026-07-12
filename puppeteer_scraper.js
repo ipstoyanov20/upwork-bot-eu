@@ -1520,6 +1520,22 @@ async function extractProposalData(page, url)
 
 	try
 	{
+		let interceptedJson = null;
+		page.on('response', async (response) => {
+			if (response.url().includes('api.tech.ec.europa.eu/search-api/prod/rest/search') && response.status() === 200) {
+				try {
+					const json = await response.json();
+					if (json && json.results && json.results.length > 0) {
+						interceptedJson = json.results[0];
+					} else if (json && json.hits && json.hits.hits && json.hits.hits.length > 0) {
+						interceptedJson = json.hits.hits[0];
+					}
+				} catch (e) {
+					// ignore
+				}
+			}
+		});
+
 		await page.goto(url, {
 			waitUntil: "networkidle2",
 			timeout: 60000,
@@ -1527,6 +1543,50 @@ async function extractProposalData(page, url)
 
 		console.log("✅ Page loaded");
 		await new Promise((r) => setTimeout(r, 2500));
+
+		let result = { url: url };
+		let usedJson = false;
+
+		if (interceptedJson) {
+			const metadata = interceptedJson.metadata || {};
+			
+			if (metadata.identifier) {
+				result.Identifier = Array.isArray(metadata.identifier) ? metadata.identifier[0] : metadata.identifier;
+				usedJson = true;
+			}
+			if (metadata.title) {
+				result.Title = Array.isArray(metadata.title) ? metadata.title[0] : metadata.title;
+				usedJson = true;
+			}
+			if (metadata.descriptionByte) {
+				result.Description = Array.isArray(metadata.descriptionByte) ? metadata.descriptionByte[0] : metadata.descriptionByte;
+				usedJson = true;
+			}
+			if (metadata.budgetOverview) {
+				try {
+					const budgetStr = Array.isArray(metadata.budgetOverview) ? metadata.budgetOverview[0] : metadata.budgetOverview;
+					const budgetObj = typeof budgetStr === 'string' ? JSON.parse(budgetStr) : budgetStr;
+					if (budgetObj && budgetObj.budgetTopicActionMap && result.Identifier) {
+						const actionMap = budgetObj.budgetTopicActionMap[result.Identifier];
+						if (actionMap && actionMap.budgetYearMap) {
+							let totalBudget = 0;
+							for (const year in actionMap.budgetYearMap) {
+								totalBudget += parseFloat(actionMap.budgetYearMap[year] || 0);
+							}
+							result.Budget = totalBudget;
+							usedJson = true;
+						}
+					}
+				} catch (e) {
+					console.warn("⚠️ Could not parse budgetOverview from JSON");
+				}
+			}
+		}
+
+		if (usedJson && result.Identifier && result.Title) {
+			console.log(`✅ Structured JSON data extracted`);
+			return result;
+		}
 
 		console.log("⏳ Waiting for details frame to load...");
 		let targetFrame = null;
@@ -1563,7 +1623,7 @@ async function extractProposalData(page, url)
 		const summary =
 			await extractSummaryInformation(targetFrame);
 
-		const result = { url: url };
+		result = { url: url };
 
 		if (Object.keys(generalInfo).length > 0)
 		{
@@ -1702,7 +1762,7 @@ async function extractProposalData(page, url)
 			}
 		});
 		
-		let URL = "https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportunities/calls-for-proposals?order=DESC&pageNumber=1&pageSize=50&sortBy=relevance&isExactMatch=true&status=31094502";
+		let URL = "https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportunities/calls-for-proposals?order=DESC&pageNumber=1&pageSize=1000&sortBy=relevance&isExactMatch=true&status=31094502";
 		if (keyword && keyword.trim() !== "") {
 			URL += "&keywords=" + encodeURIComponent(keyword);
 		}
