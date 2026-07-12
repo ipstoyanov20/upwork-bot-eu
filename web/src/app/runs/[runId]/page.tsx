@@ -233,7 +233,7 @@ function OpportunityCard({
             </div>
             <div className="mt-2 flex justify-between">
               <span className="text-black/60">Total Budget:</span>
-              <span className="font-bold underline decoration-emerald-500/30 underline-offset-2 decoration-2">{formatEUR(exportInfo.totalBudgetEUR)} EUR</span>
+              <span className="font-bold underline decoration-emerald-500/30 underline-offset-2 decoration-2" suppressHydrationWarning>{formatEUR(exportInfo.totalBudgetEUR)} EUR</span>
             </div>
             <div className="mt-1 flex justify-between">
               <span className="text-black/60">Annual Breakdowns:</span>
@@ -294,6 +294,7 @@ function OpportunityCard({
                         "px-2 py-2 align-top text-right border-b border-black/5 group-last:border-0 font-bold",
                         b.budgetAmountEUR === null ? "text-rose-500" : "text-emerald-700",
                       ].join(" ")}
+                      suppressHydrationWarning
                     >
                       {b.budgetAmountEUR !== null
                         ? `€${formatEUR(b.budgetAmountEUR || 0)}`
@@ -564,7 +565,7 @@ export default function RunDetailPage()
               </div>
               <div className="mt-1 text-sm text-black">
                 {run?.createdAt ? (
-                  <span>{formatCreatedAt(run.createdAt)}</span>
+                  <span suppressHydrationWarning>{formatCreatedAt(run.createdAt)}</span>
                 ) : (
                   <span className="text-black">Unknown time</span>
                 )}
