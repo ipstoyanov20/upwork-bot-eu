@@ -205,6 +205,85 @@ async function extractTableData(page, tableSelector = "table")
 	}
 }
 
+function saveTempBatch(allExtractionResults)
+{
+	const tempBatchPath = path.join(__dirname, "temp_batch.json");
+	let existingAnnexes = [];
+
+	// Try reading existing unique annexes from temp_batch.json if it exists, to preserve them
+	try
+	{
+		if (fs.existsSync(tempBatchPath))
+		{
+			const content = fs.readFileSync(tempBatchPath, "utf8");
+			const json = JSON.parse(content);
+			if (json.annexesBatches && Array.isArray(json.annexesBatches))
+			{
+				existingAnnexes = json.annexesBatches;
+			} else if (json.annexBatches && Array.isArray(json.annexBatches))
+			{
+				// if it was 2D, flatten it
+				existingAnnexes = json.annexBatches.flat();
+			}
+		}
+	} catch (e)
+	{
+		// ignore
+	}
+
+	const uniqueAnnexLinksSet = new Set(existingAnnexes);
+
+	// Extract unique annex links from all current extraction results
+	allExtractionResults.forEach(res =>
+	{
+		if (res.filesAndAnnexes)
+		{
+			const categories = ['annexes', 'usefulFiles', 'relatedDocuments', 'documents'];
+			categories.forEach(cat =>
+			{
+				if (Array.isArray(res.filesAndAnnexes[cat]))
+				{
+					res.filesAndAnnexes[cat].forEach(a =>
+					{
+						if (a.url)
+						{
+							let fullUrl = a.url.trim();
+							if (fullUrl.startsWith('/'))
+							{
+								fullUrl = "https://ec.europa.eu" + fullUrl;
+							}
+							uniqueAnnexLinksSet.add(fullUrl);
+						}
+					});
+				}
+			});
+		}
+	});
+
+	const uniqueAnnexLinks = Array.from(uniqueAnnexLinksSet);
+	
+	// Create chunked batches of 10
+	const annexBatchesChunked = [];
+	const ANNEX_BATCH_SIZE = 10;
+	for (let i = 0; i < uniqueAnnexLinks.length; i += ANNEX_BATCH_SIZE)
+	{
+		annexBatchesChunked.push(uniqueAnnexLinks.slice(i, i + ANNEX_BATCH_SIZE));
+	}
+
+	try
+	{
+		fs.writeFileSync(tempBatchPath, JSON.stringify({
+			callsData: allExtractionResults,
+			annexesBatches: uniqueAnnexLinks, // Flat unique URLs
+			annexBatches: annexBatchesChunked  // 2D chunked batches
+		}, null, 2), "utf8");
+		console.log(`💾 Saved temp_batch.json. Unique Annex URLs: ${uniqueAnnexLinks.length}`);
+	} catch (e)
+	{
+		console.warn(`⚠️ Failed to save temp_batch.json: ${e.message}`);
+	}
+}
+
 // ============================================================================
 // SEARCH FUNCTIONS
 // ============================================================================
@@ -1286,8 +1365,9 @@ async function extractUsefulFilesAndAnnexes(page)
 				return Array.from(map.values());
 			};
 
-			// Look for "Useful files" section
-			const headings = Array.from(document.querySelectorAll('h2, h3, h4, strong, li'));
+			const headings = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6, strong, li, th, .eui-u-font-l'));
+			
+			// 1. Look for "Useful files" section
 			const usefulFilesHeading = headings.find(h =>
 				h.textContent.toLowerCase().includes('useful file') ||
 				h.textContent.toLowerCase().includes('useful document')
@@ -1311,7 +1391,7 @@ async function extractUsefulFilesAndAnnexes(page)
 				}
 			}
 
-			// Look for "Annexes" section
+			// 2. Look for "Annexes" section
 			const annexesHeading = headings.find(h =>
 				h.textContent.toLowerCase().includes('annex') ||
 				h.textContent.toLowerCase().includes('attachments')
@@ -1335,10 +1415,12 @@ async function extractUsefulFilesAndAnnexes(page)
 				}
 			}
 
-			// Look for "Related Documents" section
+			// 3. Look for "Related Documents" or "Topic conditions and documents" section
 			const docsHeading = headings.find(h =>
 				h.textContent.toLowerCase().includes('related document') ||
-				h.textContent.toLowerCase().includes('further information')
+				h.textContent.toLowerCase().includes('further information') ||
+				h.textContent.toLowerCase().includes('topic conditions') ||
+				h.textContent.toLowerCase().includes('documents')
 			);
 
 			if (docsHeading)
@@ -1359,7 +1441,7 @@ async function extractUsefulFilesAndAnnexes(page)
 				}
 			}
 
-			// Collect all downloadable links (PDFs, documents)
+			// 4. Collect all downloadable links (PDFs, documents) on the page
 			const allLinks = document.querySelectorAll('a');
 			allLinks.forEach(link =>
 			{
@@ -1376,8 +1458,42 @@ async function extractUsefulFilesAndAnnexes(page)
 					});
 				}
 
-				if (text.toLowerCase().includes('annex') && href) {
+				const lowerText = text.toLowerCase();
+				const lowerHref = href.toLowerCase();
+				const isAnnexOrDoc = lowerText.includes('annex') || 
+				                     lowerText.includes('document') || 
+				                     lowerText.includes('attachment') || 
+				                     lowerText.includes('work programme') || 
+				                     lowerText.includes('standard application form') ||
+				                     lowerHref.includes('annex') ||
+				                     lowerHref.includes('document') ||
+				                     lowerHref.includes('wp-');
+
+				if (isAnnexOrDoc && href) {
 					results.annexes.push({ title: text, url: href });
+				}
+				
+				// If the link is inside a section or container with a header of Topics or Documents
+				let parent = link.parentElement;
+				let isTopicsOrDocs = false;
+				for (let depth = 0; depth < 5; depth++) {
+					if (!parent) break;
+					const headersInParent = Array.from(parent.querySelectorAll('h1, h2, h3, h4, h5, h6, strong, th, .eui-u-font-l'));
+					if (headersInParent.some(h => {
+						const t = h.textContent.toLowerCase();
+						return t.includes('topic') || t.includes('document') || t.includes('condition');
+					})) {
+						isTopicsOrDocs = true;
+						break;
+					}
+					parent = parent.parentElement;
+				}
+				if (isTopicsOrDocs && href) {
+					results.documents.push({
+						title: text || href.split('/').pop(),
+						url: href,
+						type: href.match(/\.([a-z]+)$/i)?.[1]?.toUpperCase() || 'DOCUMENT'
+					});
 				}
 			});
 
@@ -1701,8 +1817,7 @@ async function extractProposalData(page, url)
 
 		if (usedJson && result.Identifier && result.Title)
 		{
-			console.log(`✅ Structured JSON data extracted`);
-			return result;
+			console.log(`✅ Structured JSON data extracted. Proceeding to extract annexes from page...`);
 		}
 
 		console.log("⏳ Waiting for details frame to load...");
@@ -1728,19 +1843,40 @@ async function extractProposalData(page, url)
 			console.log(`✅ Opportunities details frame detected: ${targetFrame.url()}`);
 		}
 
-		const generalInfo =
-			await extractGeneralInformation(targetFrame);
-		const topicDesc =
-			await extractTopicDescription(targetFrame);
-		const topics = await extractTopics(targetFrame);
-		const partnerSearches =
-			await extractPartnerSearches(targetFrame);
-		const filesAndAnnexes =
-			await extractUsefulFilesAndAnnexes(targetFrame);
-		const summary =
-			await extractSummaryInformation(targetFrame);
+		// Save the entire rendered page as HTML into a single local temporary file.
+		// Reuse this same file for every call: before processing a new call, clear its contents, then save the new page HTML.
+		const tempHtmlPath = path.join(__dirname, "temp_call_page.html");
+		try
+		{
+			// Clear contents of temporary file before writing
+			fs.writeFileSync(tempHtmlPath, "", "utf8");
 
-		result = { url: url };
+			const renderedHtml = await targetFrame.content();
+			fs.writeFileSync(tempHtmlPath, renderedHtml, "utf8");
+			console.log(`💾 Entire rendered page HTML saved to local temporary file: ${tempHtmlPath}`);
+		} catch (htmlErr)
+		{
+			console.error(`⚠️ Failed to save rendered page HTML: ${htmlErr.message}`);
+		}
+
+		// Navigate to the local temporary file
+		const fileUrl = `file:///${tempHtmlPath.replace(/\\/g, '/')}`;
+		console.log(`📍 Navigating Puppeteer to local HTML file: ${fileUrl}`);
+		await page.goto(fileUrl, { waitUntil: "domcontentloaded" });
+		const localFrame = page.mainFrame();
+
+		// Extract all required data from this local HTML file instead of querying the live page multiple times
+		const generalInfo =
+			await extractGeneralInformation(localFrame);
+		const topicDesc =
+			await extractTopicDescription(localFrame);
+		const topics = await extractTopics(localFrame);
+		const partnerSearches =
+			await extractPartnerSearches(localFrame);
+		const filesAndAnnexes =
+			await extractUsefulFilesAndAnnexes(localFrame);
+		const summary =
+			await extractSummaryInformation(localFrame);
 
 		if (Object.keys(generalInfo).length > 0)
 		{
@@ -1988,19 +2124,17 @@ async function extractProposalData(page, url)
 				if (result.error)
 				{
 					failedItems.push({ url, error: result.error });
+				} else if (!result.Title || result.Title.trim() === "" || result.Title.toLowerCase().includes("untitled"))
+				{
+					console.log(`⚠️ Skipping Untitled Opportunity (URL: ${url})`);
+					failedItems.push({ url, error: "Untitled Opportunity (skipped)" });
 				} else
 				{
 					successCount++;
+					allExtractionResults.push(result);
+					// Continuously save locally so user can monitor progress
+					saveTempBatch(allExtractionResults);
 				}
-
-				allExtractionResults.push(result);
-
-				// Continuously save locally so user can monitor progress
-				const tempBatchPath = require('path').join(__dirname, "temp_batch.json");
-				require('fs').writeFileSync(tempBatchPath, JSON.stringify({
-					callsData: allExtractionResults,
-					annexBatches: [] // Will be fully populated at the end of the script
-				}, null, 2), "utf8");
 			} catch (err)
 			{
 				console.error(`❌ Failed to process tab: ${err.message}`);
@@ -2021,38 +2155,37 @@ async function extractProposalData(page, url)
 		}
 
 		// EXTRACT UNIQUE ANNEX LINKS AND BATCH THEM
-		const uniqueAnnexLinksSet = new Set();
-		allExtractionResults.forEach(res => {
-			if (res.filesAndAnnexes && res.filesAndAnnexes.annexes) {
-				res.filesAndAnnexes.annexes.forEach(a => {
-					// resolve relative URLs if necessary, but usually they are absolute or root-relative
-					let fullUrl = a.url;
-					if (fullUrl.startsWith('/')) {
-						fullUrl = "https://ec.europa.eu" + fullUrl;
-					}
-					uniqueAnnexLinksSet.add(fullUrl);
-				});
-			}
-		});
+		saveTempBatch(allExtractionResults);
 
-		const uniqueAnnexLinks = Array.from(uniqueAnnexLinksSet);
-		const annexBatches = [];
-		const ANNEX_BATCH_SIZE = 10; 
-		for (let i = 0; i < uniqueAnnexLinks.length; i += ANNEX_BATCH_SIZE) {
-			annexBatches.push(uniqueAnnexLinks.slice(i, i + ANNEX_BATCH_SIZE));
-		}
+		// Read the final chunked batches for Firebase
+		let finalAnnexBatches = [];
+		let totalUniqueAnnexesCount = 0;
+		try
+		{
+			const tempBatchPathFinal = require('path').join(__dirname, "temp_batch.json");
+			const finalData = JSON.parse(require('fs').readFileSync(tempBatchPathFinal, "utf8"));
+			finalAnnexBatches = finalData.annexBatches || [];
+			totalUniqueAnnexesCount = finalData.annexesBatches ? finalData.annexesBatches.length : 0;
+		} catch (e) {}
 
-		const tempBatchPathFinal = require('path').join(__dirname, "temp_batch.json");
-		require('fs').writeFileSync(tempBatchPathFinal, JSON.stringify({
-			callsData: allExtractionResults,
-			annexBatches: annexBatches
-		}, null, 2), "utf8");
-		console.log(`\n📎 Saved ${uniqueAnnexLinks.length} unique Annex links in ${annexBatches.length} batches to temp_batch.json`);
+		console.log(`\n📎 Saved ${totalUniqueAnnexesCount} unique Annex links in ${finalAnnexBatches.length} batches to temp_batch.json`);
 
-		if (currentRunRef && annexBatches.length > 0) {
-			console.log(`📡 Uploading Annex batches to Firebase database...`);
-			await currentRunRef.child('annex_batches').set(annexBatches);
-			console.log(`✅ Annex batches upload complete.`);
+		if (currentRunRef && finalAnnexBatches.length > 0)
+		{
+			console.log(`📡 Uploading Annex batches and consolidated files to Firebase database...`);
+			await currentRunRef.child('annex_batches').set(finalAnnexBatches);
+			
+			// Upload flat annexes and filesAndAnnexes to run root
+			const flatUniqueAnnexes = finalAnnexBatches.flat().map(url => ({
+				title: url.split('/').pop() || url,
+				url: url
+			}));
+			await currentRunRef.child('annexes').set(flatUniqueAnnexes);
+			await currentRunRef.child('filesAndAnnexes').set({
+				annexes: flatUniqueAnnexes,
+				documents: flatUniqueAnnexes
+			});
+			console.log(`✅ Annex batches and filesAndAnnexes upload complete.`);
 		}
 
 		console.log("\n" + "=".repeat(70));

@@ -68,7 +68,7 @@ type Report = {
   };
   budgets: { totalsByYear: TotalsByYearRow[]; rows: BudgetRow[] };
   annexes: { rows: LinkRow[]; unique: UniqueLinkRow[] };
-  downloads: { rows: LinkRow[]; unique: UniqueLinkRow[] };
+  documents: { rows: LinkRow[]; unique: UniqueLinkRow[] };
 };
 
 function formatCreatedAt(createdAt?: string) {
@@ -184,6 +184,7 @@ export default function LocalExportReportPage() {
 
   const [budgetQ, setBudgetQ] = useState("");
   const [annexQ, setAnnexQ] = useState("");
+  const [documentQ, setDocumentQ] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -247,6 +248,19 @@ export default function LocalExportReportPage() {
       return hay.includes(q);
     });
   }, [report, annexQ]);
+
+  const filteredDocuments = useMemo(() => {
+    const rows = report?.documents?.rows ?? [];
+    const q = documentQ.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((r) => {
+      const hay = [r.title, r.url, r.proposalUrl, r.proposalRunId]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return hay.includes(q);
+    });
+  }, [report, documentQ]);
 
   const bg =
     "min-h-screen bg-[radial-gradient(1200px_700px_at_20%_10%,rgba(33,97,140,0.18),transparent_60%),radial-gradient(900px_600px_at_80%_0%,rgba(219,98,74,0.20),transparent_55%),linear-gradient(180deg,#fbf7f0,rgba(251,247,240,0.7))]";
@@ -568,6 +582,80 @@ export default function LocalExportReportPage() {
                   },
                 ]}
                 rows={filteredAnnexes as unknown as Array<Record<string, unknown>>}
+                rowKey={(r, idx) => `${String(r.url ?? "")}-${idx}`}
+              />
+            </Section>
+
+            <Section
+              title="Documents"
+              right={
+                <>
+                  <input
+                    value={documentQ}
+                    onChange={(e) => setDocumentQ(e.target.value)}
+                    placeholder="Filter documents..."
+                    className="w-64 rounded-xl border border-black/10 bg-white/80 px-3 py-2 text-xs text-black outline-none focus:border-black/30"
+                  />
+                  <button
+                    onClick={() =>
+                      downloadText(
+                        `documents${runId ? `-${runId}` : ""}.csv`,
+                        toCsv(filteredDocuments as unknown as Array<Record<string, unknown>>, [
+                          { key: "proposalRunId", label: "Run ID" },
+                          { key: "proposalRunCreatedAt", label: "Run Created At" },
+                          { key: "proposalUrl", label: "Proposal URL" },
+                          { key: "title", label: "Title" },
+                          { key: "url", label: "URL" },
+                        ])
+                      )
+                    }
+                    className="rounded-xl border border-black/10 bg-black/5 px-3 py-2 text-xs font-semibold text-black hover:bg-black/10"
+                  >
+                    Download CSV
+                  </button>
+                </>
+              }
+            >
+              <div className="mb-3 text-xs text-black/70">
+                Showing {filteredDocuments.length.toLocaleString()} of{" "}
+                {(report.documents?.rows ?? []).length.toLocaleString()} document rows
+              </div>
+              <Table
+                columns={[
+                  { key: "title", label: "Title" },
+                  {
+                    key: "url",
+                    label: "Link",
+                    render: (r) => (
+                      <a
+                        className="underline decoration-black/20 underline-offset-2 hover:decoration-black/50"
+                        href={r.url as string}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                      >
+                        {r.url as string}
+                      </a>
+                    ),
+                  },
+                  {
+                    key: "proposalUrl",
+                    label: "Proposal",
+                    render: (r) =>
+                      (r.proposalUrl as string) ? (
+                        <a
+                          className="underline decoration-black/20 underline-offset-2 hover:decoration-black/50"
+                          href={r.proposalUrl as string}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                        >
+                          Open →
+                        </a>
+                      ) : (
+                        "—"
+                      ),
+                  },
+                ]}
+                rows={filteredDocuments as unknown as Array<Record<string, unknown>>}
                 rowKey={(r, idx) => `${String(r.url ?? "")}-${idx}`}
               />
             </Section>

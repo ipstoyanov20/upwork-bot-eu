@@ -158,7 +158,8 @@ export default function Home() {
       (snap) => {
         const v = snap.val() as unknown;
         const dataObj = isRecord(v) && isRecord(v.data) ? v.data : (isRecord(v) && Array.isArray(v.data) ? v.data : {});
-        const dataCount = Array.isArray(dataObj) ? dataObj.length : Object.keys(dataObj).length;
+        const arr = Array.isArray(dataObj) ? dataObj : Object.values(dataObj);
+        const dataCount = arr.filter((o: any) => o && o.Title && o.Title.trim() !== "" && !o.Title.toLowerCase().includes("untitled")).length;
         const next: RunSummary = {
           id: snap.key ?? "",
           createdAt: pickString(v, "createdAt"),
@@ -178,7 +179,8 @@ export default function Home() {
       (snap) => {
         const v = snap.val() as unknown;
         const dataObj = isRecord(v) && isRecord(v.data) ? v.data : (isRecord(v) && Array.isArray(v.data) ? v.data : {});
-        const dataCount = Array.isArray(dataObj) ? dataObj.length : Object.keys(dataObj).length;
+        const arr = Array.isArray(dataObj) ? dataObj : Object.values(dataObj);
+        const dataCount = arr.filter((o: any) => o && o.Title && o.Title.trim() !== "" && !o.Title.toLowerCase().includes("untitled")).length;
         const next: RunSummary = {
           id: snap.key ?? "",
           createdAt: pickString(v, "createdAt"),

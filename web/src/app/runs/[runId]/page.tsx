@@ -24,6 +24,8 @@ type Opportunity = {
   Identifier?: string;
   Title?: string;
   Description?: string;
+  OpeningDate?: string;
+  DeadlineDate?: string;
   Budgets?: NewBudget[];
   filesAndAnnexes?: {
     usefulFiles?: NewAnnex[];
@@ -38,6 +40,11 @@ type EuProposalsRun = {
   createdAt?: string;
   data?: Record<string, Opportunity>;
   annex_batches?: string[][];
+  annexes?: { title: string; url: string }[];
+  filesAndAnnexes?: {
+    annexes?: { title: string; url: string }[];
+    documents?: { title: string; url: string }[];
+  };
 };
 
 function formatCreatedAt(createdAt?: string) {
@@ -80,14 +87,58 @@ function OpportunityCard({
   const identifier = opportunity.Identifier;
   const href = opportunity.url;
   
-  // Extract potential dates from keyInformation
-  const openingDate = opportunity.keyInformation?.['Opening_date'] || opportunity.keyInformation?.['Planned_opening_date'];
-  const deadlineDate = opportunity.keyInformation?.['Deadline_date'] || opportunity.keyInformation?.['Deadline_dates'];
+  // Extract potential dates from root or keyInformation
+  const openingDate = opportunity.OpeningDate || opportunity.keyInformation?.['Opening_date'] || opportunity.keyInformation?.['Planned_opening_date'];
+  const deadlineDate = opportunity.DeadlineDate || opportunity.keyInformation?.['Deadline_date'] || opportunity.keyInformation?.['Deadline_dates'];
 
   const [isDescOpen, setIsDescOpen] = useState(false);
 
   const budgets = opportunity.Budgets || [];
-  const annexes = opportunity.filesAndAnnexes?.annexes || [];
+  
+  const filesAndAnnexes = opportunity.filesAndAnnexes || {};
+  const allFiles: { title: string; url: string; category: string; type?: string }[] = [];
+  
+  if (Array.isArray(filesAndAnnexes.annexes)) {
+    filesAndAnnexes.annexes.forEach((a: any) => {
+      allFiles.push({ title: a.title, url: a.url, category: "Annex", type: a.type });
+    });
+  }
+  if (Array.isArray(filesAndAnnexes.usefulFiles)) {
+    filesAndAnnexes.usefulFiles.forEach((a: any) => {
+      allFiles.push({ title: a.title, url: a.url, category: "Useful File", type: a.type });
+    });
+  }
+  if (Array.isArray(filesAndAnnexes.relatedDocuments)) {
+    filesAndAnnexes.relatedDocuments.forEach((a: any) => {
+      allFiles.push({ title: a.title, url: a.url, category: "Related Document", type: a.type });
+    });
+  }
+  if (Array.isArray(filesAndAnnexes.documents)) {
+    filesAndAnnexes.documents.forEach((a: any) => {
+      allFiles.push({ title: a.title, url: a.url, category: "Document", type: a.type });
+    });
+  }
+
+  const uniqueFilesMap = new Map<string, typeof allFiles[0]>();
+  allFiles.forEach(f => {
+    if (!f.url) return;
+    let fullUrl = f.url.trim();
+    if (fullUrl.startsWith('/')) {
+      fullUrl = "https://ec.europa.eu" + fullUrl;
+    }
+    if (!uniqueFilesMap.has(fullUrl)) {
+      uniqueFilesMap.set(fullUrl, { ...f, url: fullUrl });
+    } else {
+      const existing = uniqueFilesMap.get(fullUrl)!;
+      if (f.category === "Annex" || f.category === "Useful File") {
+        existing.category = f.category;
+      }
+      if (f.title && f.title.length > existing.title.length) {
+        existing.title = f.title;
+      }
+    }
+  });
+  const filesList = Array.from(uniqueFilesMap.values());
 
   return (
     <article className="rounded-2xl border border-black/10 bg-white/70 p-5 shadow-sm backdrop-blur">
@@ -183,41 +234,71 @@ function OpportunityCard({
         </div>
       ) : null}
 
-      {/* Annexes Table */}
-      {annexes.length > 0 ? (
+      {/* Annexes & Documents Table */}
+      {filesList.length > 0 ? (
         <div className="mt-4 rounded-xl border border-black/10 bg-white/60 p-4 text-xs text-black shadow-sm overflow-hidden">
           <div className="font-semibold tracking-tight flex items-center gap-2 border-b border-black/5 pb-2 mb-3">
             <svg className="h-4 w-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
-            Annexes & Attachments
+            Annexes & Documents ({filesList.length})
           </div>
           <div className="overflow-x-auto max-h-[300px]">
             <table className="min-w-full text-left text-[11px] border-separate border-spacing-y-1">
               <thead>
                 <tr className="text-black/50">
-                  <th className="px-2 py-1 font-medium bg-black/5 rounded-l-md w-1/2">Title</th>
+                  <th className="px-2 py-1 font-medium bg-black/5 rounded-l-md w-24">Category</th>
+                  <th className="px-2 py-1 font-medium bg-black/5 w-1/2">Title</th>
                   <th className="px-2 py-1 font-medium bg-black/5 rounded-r-md">Link</th>
                 </tr>
               </thead>
               <tbody>
-                {annexes.map((item, idx) => (
-                  <tr key={idx} className="group hover:bg-blue-50/50 transition-colors">
-                    <td className="px-2 py-2 align-top font-medium text-black/80">{item.title}</td>
-                    <td className="px-2 py-2 align-top">
-                      <a
-                        href={item.url}
-                        target="_blank"
-                        rel="noreferrer noopener"
-                        className="flex items-center gap-1 break-all text-blue-600 hover:text-blue-800 transition-colors"
-                      >
-                        <span className="truncate max-w-[250px] underline decoration-blue-500/30 underline-offset-2">
-                          {item.url}
+                {filesList.map((item, idx) => {
+                  const ext = item.type || item.url.split('.').pop()?.split(/[?#]/)[0]?.toUpperCase() || "FILE";
+                  let badgeColor = "bg-gray-100 text-gray-700";
+                  if (ext === "PDF") badgeColor = "bg-red-50 text-red-700 border-red-100";
+                  else if (["ZIP", "RAR"].includes(ext)) badgeColor = "bg-amber-50 text-amber-700 border-amber-100";
+                  else if (["XLS", "XLSX"].includes(ext)) badgeColor = "bg-green-50 text-green-700 border-green-100";
+                  else if (["DOC", "DOCX"].includes(ext)) badgeColor = "bg-blue-50 text-blue-700 border-blue-100";
+                  
+                  let catColor = "bg-slate-100 text-slate-700";
+                  if (item.category === "Annex") catColor = "bg-blue-100 text-blue-800 font-semibold";
+                  else if (item.category === "Useful File") catColor = "bg-emerald-100 text-emerald-800";
+                  else if (item.category === "Related Document") catColor = "bg-purple-100 text-purple-800";
+
+                  return (
+                    <tr key={idx} className="group hover:bg-blue-50/50 transition-colors">
+                      <td className="px-2 py-2 align-middle">
+                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] ${catColor}`}>
+                          {item.category}
                         </span>
-                      </a>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="px-2 py-2 align-middle font-medium text-black/80">
+                        <div className="flex items-center gap-1.5">
+                          <span className={`inline-flex items-center px-1 py-0.5 rounded font-mono text-[8px] border ${badgeColor}`}>
+                            {ext}
+                          </span>
+                          <span>{item.title}</span>
+                        </div>
+                      </td>
+                      <td className="px-2 py-2 align-middle">
+                        <a
+                          href={item.url}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          className="inline-flex items-center gap-1 break-all text-blue-600 hover:text-blue-800 transition-colors"
+                        >
+                          <span className="truncate max-w-[250px] underline decoration-blue-500/30 underline-offset-2">
+                            {item.url}
+                          </span>
+                          <svg className="h-3 w-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                          </svg>
+                        </a>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -239,6 +320,21 @@ export default function RunDetailPage() {
   const [loading, setLoading] = useState(() => firebaseReady);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState("");
+  const [isRunAnnexesOpen, setIsRunAnnexesOpen] = useState(false);
+
+  const runAnnexes = useMemo(() => {
+    if (run?.annexes && Array.isArray(run.annexes)) {
+      return run.annexes;
+    }
+    if (run?.filesAndAnnexes?.annexes && Array.isArray(run.filesAndAnnexes.annexes)) {
+      return run.filesAndAnnexes.annexes;
+    }
+    if (run?.annex_batches && Array.isArray(run.annex_batches)) {
+      const flat = run.annex_batches.flat();
+      return flat.map(url => ({ title: url.split('/').pop() || url, url }));
+    }
+    return [];
+  }, [run]);
 
   useEffect(() => {
     if (!firebaseReady || !rtdb || !runId) return;
@@ -268,8 +364,8 @@ export default function RunDetailPage() {
   const opportunities: Opportunity[] = useMemo(() => {
     const data = run?.data;
     if (!data) return [];
-    if (Array.isArray(data)) return data;
-    return Object.values(data);
+    const arr = Array.isArray(data) ? data : Object.values(data);
+    return arr.filter(o => o && o.Title && o.Title.trim() !== "" && !o.Title.toLowerCase().includes("untitled"));
   }, [run]);
 
   const filtered = useMemo(() => {
@@ -353,6 +449,87 @@ export default function RunDetailPage() {
             </div>
           ) : (
             <div className="flex flex-col gap-6">
+              {/* Run-level Annexes Explorer */}
+              {runAnnexes.length > 0 && (
+                <div className="rounded-2xl border border-black/10 bg-white/80 p-5 shadow-sm backdrop-blur">
+                  <button
+                    onClick={() => setIsRunAnnexesOpen(!isRunAnnexesOpen)}
+                    className="flex w-full items-center justify-between font-semibold text-black hover:opacity-80 transition"
+                  >
+                    <div className="flex items-center gap-2">
+                      <svg className="h-5 w-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 4H6a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-2m-4-1v8m0 0l3-3m-3 3L9 8m-5 5h2.586a1 1 0 01.707.293l2.414 2.414a1 1 0 00.707.293h3.172a1 1 0 00.707-.293l2.414-2.414a1 1 0 01.707-.293H20" />
+                      </svg>
+                      <span>Run-level Collected Annexes & Documents ({runAnnexes.length})</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-neutral-500 font-normal">
+                        {isRunAnnexesOpen ? "Hide" : "Show"}
+                      </span>
+                      <svg
+                        className={`h-4 w-4 transform transition-transform ${isRunAnnexesOpen ? "rotate-180" : ""}`}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </div>
+                  </button>
+
+                  {isRunAnnexesOpen && (
+                    <div className="mt-4 border-t border-black/5 pt-4">
+                      <div className="overflow-x-auto max-h-[400px] scrollbar-thin">
+                        <table className="min-w-full text-left text-xs border-separate border-spacing-y-1">
+                          <thead>
+                            <tr className="text-black/50">
+                              <th className="px-2 py-1.5 font-medium bg-black/5 rounded-l-md w-1/3">Title</th>
+                              <th className="px-2 py-1.5 font-medium bg-black/5 rounded-r-md">URL Link</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {runAnnexes.map((item, idx) => {
+                              const ext = item.url.split('.').pop()?.split(/[?#]/)[0]?.toUpperCase() || "FILE";
+                              let badgeColor = "bg-gray-100 text-gray-700";
+                              if (ext === "PDF") badgeColor = "bg-red-50 text-red-700 border-red-100";
+                              else if (["ZIP", "RAR"].includes(ext)) badgeColor = "bg-amber-50 text-amber-700 border-amber-100";
+
+                              return (
+                                <tr key={idx} className="hover:bg-blue-50/40 transition-colors">
+                                  <td className="px-2 py-2 align-middle font-medium text-black/80">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className={`inline-flex items-center px-1.5 py-0.2 rounded font-mono text-[8px] border ${badgeColor}`}>
+                                        {ext}
+                                      </span>
+                                      <span className="truncate max-w-[300px]" title={item.title}>{item.title}</span>
+                                    </div>
+                                  </td>
+                                  <td className="px-2 py-2 align-middle">
+                                    <a
+                                      href={item.url}
+                                      target="_blank"
+                                      rel="noreferrer noopener"
+                                      className="inline-flex items-center gap-1 break-all text-blue-600 hover:text-blue-800 transition"
+                                    >
+                                      <span className="truncate max-w-[400px] underline decoration-blue-500/20 underline-offset-2">
+                                        {item.url}
+                                      </span>
+                                      <svg className="h-3 w-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                      </svg>
+                                    </a>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {filtered.map((opp, i) => (
                 <OpportunityCard
                   key={opp.Identifier || i}
