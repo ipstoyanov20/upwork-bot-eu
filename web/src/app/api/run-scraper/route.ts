@@ -35,22 +35,37 @@ export async function POST(req: NextRequest) {
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       start(controller) {
+        let isClosed = false;
         child.stdout.on("data", (data) => {
-          controller.enqueue(encoder.encode(data.toString()));
+          if (!isClosed) {
+            try { controller.enqueue(encoder.encode(data.toString())); } catch(e) {}
+          }
         });
 
         child.stderr.on("data", (data) => {
-          controller.enqueue(encoder.encode(data.toString()));
+          if (!isClosed) {
+            try { controller.enqueue(encoder.encode(data.toString())); } catch(e) {}
+          }
         });
 
         child.on("close", (code) => {
-          controller.enqueue(encoder.encode(`\n[PROCESS_COMPLETED] Scraper finished with exit code ${code}\n`));
-          controller.close();
+          if (!isClosed) {
+            try {
+              controller.enqueue(encoder.encode(`\n[PROCESS_COMPLETED] Scraper finished with exit code ${code}\n`));
+              controller.close();
+            } catch(e) {}
+            isClosed = true;
+          }
         });
 
         child.on("error", (err) => {
-          controller.enqueue(encoder.encode(`[PROCESS_ERROR] Failed to start scraper: ${err.message}\n`));
-          controller.close();
+          if (!isClosed) {
+            try {
+              controller.enqueue(encoder.encode(`[PROCESS_ERROR] Failed to start scraper: ${err.message}\n`));
+              controller.close();
+            } catch(e) {}
+            isClosed = true;
+          }
         });
       },
     });

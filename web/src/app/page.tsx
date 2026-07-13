@@ -82,7 +82,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [scraperKeyword, setScraperKeyword] = useState("hydrogen energy");
+  const [scraperKeyword, setScraperKeyword] = useState("health");
   const [scraperLogs, setScraperLogs] = useState<string>("");
   const [isScraperRunning, setIsScraperRunning] = useState(false);
   const [scraperStatus, setScraperStatus] = useState<"idle" | "running" | "completed" | "failed">("idle");
@@ -148,7 +148,7 @@ export default function Home() {
     if (!firebaseReady || !rtdb) return;
 
     const runsQuery = query(
-      ref(rtdb, "eu_discovery_results"),
+      ref(rtdb, "eu_proposals"),
       orderByChild("createdAt"),
       limitToLast(20)
     );
@@ -157,11 +157,12 @@ export default function Home() {
       runsQuery,
       (snap) => {
         const v = snap.val() as unknown;
-        const dataArr = isRecord(v) && Array.isArray(v.data) ? v.data : [];
+        const dataObj = isRecord(v) && isRecord(v.data) ? v.data : (isRecord(v) && Array.isArray(v.data) ? v.data : {});
+        const dataCount = Array.isArray(dataObj) ? dataObj.length : Object.keys(dataObj).length;
         const next: RunSummary = {
           id: snap.key ?? "",
           createdAt: pickString(v, "createdAt"),
-          dataCount: dataArr.length,
+          dataCount: dataCount,
         };
         setRuns((prev) => {
           const map = new Map(prev.map((r) => [r.id, r]));
@@ -176,11 +177,12 @@ export default function Home() {
       runsQuery,
       (snap) => {
         const v = snap.val() as unknown;
-        const dataArr = isRecord(v) && Array.isArray(v.data) ? v.data : [];
+        const dataObj = isRecord(v) && isRecord(v.data) ? v.data : (isRecord(v) && Array.isArray(v.data) ? v.data : {});
+        const dataCount = Array.isArray(dataObj) ? dataObj.length : Object.keys(dataObj).length;
         const next: RunSummary = {
           id: snap.key ?? "",
           createdAt: pickString(v, "createdAt"),
-          dataCount: dataArr.length,
+          dataCount: dataCount,
         };
         setRuns((prev) => {
           const map = new Map(prev.map((r) => [r.id, r]));
@@ -218,7 +220,7 @@ export default function Home() {
     if (!rtdb || !confirm("Are you sure you want to delete this run? All discovered data for this specific run will be removed from the database.")) return;
     
     try {
-      await remove(ref(rtdb, `eu_discovery_results/${id}`));
+      await remove(ref(rtdb, `eu_proposals/${id}`));
     } catch (e) {
       alert(`Delete failed: ${errorMessage(e)}`);
     }
@@ -230,10 +232,10 @@ export default function Home() {
         <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight text-black">
-              EU Discovery Results - Runs
+              EU Proposals - Extraction Runs
             </h1>
             <p className="text-sm text-black">
-              Realtime view of <code className="font-mono">/eu_discovery_results</code>{" "}
+              Realtime view of <code className="font-mono">/eu_proposals</code>{" "}
               in Firebase RTDB.
             </p>
           </div>
@@ -278,7 +280,7 @@ export default function Home() {
               </p>
               <p className="mt-3 text-sm text-black">
                 If this says permission denied, RTDB rules must allow read on{" "}
-                <code className="font-mono">/eu_discovery_results</code>.
+                <code className="font-mono">/eu_proposals</code>.
               </p>
             </div>
           ) : loading ? (
@@ -296,7 +298,7 @@ export default function Home() {
                 No runs found
               </h2>
               <p className="mt-2 text-sm text-black">
-                The database path <code className="font-mono">/eu_discovery_results</code>{" "}
+                The database path <code className="font-mono">/eu_proposals</code>{" "}
                 is empty (or you do not have read access).
               </p>
             </div>

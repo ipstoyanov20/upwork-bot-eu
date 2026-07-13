@@ -265,14 +265,19 @@ async function discoverProposals(page, keyword)
 	console.log("=".repeat(70));
 
 	const searchApiResponses = [];
-	page.on('response', async (response) => {
-		if (response.url().includes('api.tech.ec.europa.eu/search-api/prod/rest/search') && response.status() === 200) {
-			try {
+	page.on('response', async (response) =>
+	{
+		if (response.url().includes('api.tech.ec.europa.eu/search-api/prod/rest/search') && response.status() === 200)
+		{
+			try
+			{
 				const json = await response.json();
-				if (json) {
+				if (json)
+				{
 					searchApiResponses.push(json);
 				}
-			} catch (e) {
+			} catch (e)
+			{
 				// ignore
 			}
 		}
@@ -856,9 +861,10 @@ async function discoverProposals(page, keyword)
 			}
 		});
 		console.log("✅ Page size set to 100");
-		
+
 		let waitTime = 0;
-		while(searchApiResponses.length === responseCountBefore && waitTime < 10000) {
+		while (searchApiResponses.length === responseCountBefore && waitTime < 10000)
+		{
 			await new Promise(r => setTimeout(r, 500));
 			waitTime += 500;
 		}
@@ -876,36 +882,61 @@ async function discoverProposals(page, keyword)
 		if (searchApiResponses.length === 0) return [];
 		const latest = searchApiResponses[searchApiResponses.length - 1];
 		let items = [];
-		if (latest.results) {
+		if (latest.results)
+		{
 			items = latest.results;
-		} else if (latest.hits && latest.hits.hits) {
+		} else if (latest.hits && latest.hits.hits)
+		{
 			items = latest.hits.hits;
-		} else if (Array.isArray(latest)) {
+		} else if (Array.isArray(latest))
+		{
 			items = latest;
 		}
 
 		const extracted = [];
-		for (const item of items) {
+		for (const item of items)
+		{
 			let identifier = null;
 			let title = "N/A";
-			
-			if (item.metadata && item.metadata.identifier) {
+
+			if (item.metadata && item.metadata.identifier)
+			{
 				identifier = Array.isArray(item.metadata.identifier) ? item.metadata.identifier[0] : item.metadata.identifier;
-			} else if (item.identifier) {
+			} else if (item.identifier)
+			{
 				identifier = Array.isArray(item.identifier) ? item.identifier[0] : item.identifier;
 			}
-			
-			if (item.metadata && item.metadata.title) {
+
+			if (item.metadata && item.metadata.title)
+			{
 				title = Array.isArray(item.metadata.title) ? item.metadata.title[0] : item.metadata.title;
 			}
 
-			if (identifier) {
+			let startDateStr = "N/A";
+			let deadlineDateStr = "N/A";
+			
+			const rawStartDate = item.metadata && item.metadata.startDate ? (Array.isArray(item.metadata.startDate) ? item.metadata.startDate[0] : item.metadata.startDate) :
+								item.startDate ? (Array.isArray(item.startDate) ? item.startDate[0] : item.startDate) : null;
+			if (rawStartDate) {
+				const dateObj = new Date(rawStartDate);
+				startDateStr = isNaN(dateObj.getTime()) ? rawStartDate : dateObj.toLocaleDateString("en-GB", { day: 'numeric', month: 'long', year: 'numeric' });
+			}
+
+			const rawDeadlineDate = item.metadata && item.metadata.deadlineDate ? (Array.isArray(item.metadata.deadlineDate) ? item.metadata.deadlineDate[0] : item.metadata.deadlineDate) :
+									item.deadlineDate ? (Array.isArray(item.deadlineDate) ? item.deadlineDate[0] : item.deadlineDate) : null;
+			if (rawDeadlineDate) {
+				const dateObj = new Date(rawDeadlineDate);
+				deadlineDateStr = isNaN(dateObj.getTime()) ? rawDeadlineDate : dateObj.toLocaleDateString("en-GB", { day: 'numeric', month: 'long', year: 'numeric' });
+			}
+
+			if (identifier)
+			{
 				extracted.push({
 					title: title,
 					href: `https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportunities/topic-details/${identifier}?keywords=${encodeURIComponent(keyword)}`,
 					topicCode: identifier,
-					openingDate: "N/A",
-					deadlineDate: "N/A",
+					openingDate: startDateStr,
+					deadlineDate: deadlineDateStr,
 				});
 			}
 		}
@@ -931,9 +962,10 @@ async function discoverProposals(page, keyword)
 				{
 					const responseCountBefore = searchApiResponses.length;
 					await targetButton.click();
-					
+
 					let waitTime = 0;
-					while(searchApiResponses.length === responseCountBefore && waitTime < 10000) {
+					while (searchApiResponses.length === responseCountBefore && waitTime < 10000)
+					{
 						await new Promise(r => setTimeout(r, 500));
 						waitTime += 500;
 					}
@@ -1343,6 +1375,10 @@ async function extractUsefulFilesAndAnnexes(page)
 						type: href.match(/\.([a-z]+)$/i)?.[1]?.toUpperCase() || 'DOCUMENT'
 					});
 				}
+
+				if (text.toLowerCase().includes('annex') && href) {
+					results.annexes.push({ title: text, url: href });
+				}
 			});
 
 			// Deduplicate all arrays by URL
@@ -1521,19 +1557,36 @@ async function extractProposalData(page, url)
 	try
 	{
 		let interceptedJson = null;
-		page.on('response', async (response) => {
-			if (response.url().includes('api.tech.ec.europa.eu/search-api/prod/rest/search') && response.status() === 200) {
-				try {
-					const json = await response.json();
-					if (json && json.results && json.results.length > 0) {
-						interceptedJson = json.results[0];
-					} else if (json && json.hits && json.hits.hits && json.hits.hits.length > 0) {
-						interceptedJson = json.hits.hits[0];
+		const jsonPromise = new Promise(resolve => {
+			page.on('response', async (response) =>
+			{
+				if (response.url().includes('api.tech.ec.europa.eu/search-api/prod/rest/search') && response.status() === 200)
+				{
+					try
+					{
+						const json = await response.json();
+						let found = null;
+						if (json && json.results && json.results.length > 0)
+						{
+							found = json.results[0];
+						} else if (json && json.hits && json.hits.hits && json.hits.hits.length > 0)
+						{
+							found = json.hits.hits[0];
+						}
+						
+						if (found && found.metadata && found.metadata.identifier) {
+							const idStr = Array.isArray(found.metadata.identifier) ? found.metadata.identifier[0] : found.metadata.identifier;
+							if (url.includes(idStr)) {
+								resolve(found);
+							}
+						}
+					} catch (e)
+					{
+						// ignore
 					}
-				} catch (e) {
-					// ignore
 				}
-			}
+			});
+			setTimeout(() => resolve(null), 15000);
 		});
 
 		await page.goto(url, {
@@ -1542,48 +1595,112 @@ async function extractProposalData(page, url)
 		});
 
 		console.log("✅ Page loaded");
-		await new Promise((r) => setTimeout(r, 2500));
+		interceptedJson = await Promise.race([
+			jsonPromise,
+			new Promise(r => setTimeout(() => r(null), 15000))
+		]);
+
 
 		let result = { url: url };
 		let usedJson = false;
 
-		if (interceptedJson) {
+		if (interceptedJson)
+		{
 			const metadata = interceptedJson.metadata || {};
-			
-			if (metadata.identifier) {
+
+			if (metadata.identifier)
+			{
 				result.Identifier = Array.isArray(metadata.identifier) ? metadata.identifier[0] : metadata.identifier;
 				usedJson = true;
 			}
-			if (metadata.title) {
+			if (metadata.title)
+			{
 				result.Title = Array.isArray(metadata.title) ? metadata.title[0] : metadata.title;
 				usedJson = true;
 			}
-			if (metadata.descriptionByte) {
+			if (metadata.descriptionByte)
+			{
 				result.Description = Array.isArray(metadata.descriptionByte) ? metadata.descriptionByte[0] : metadata.descriptionByte;
 				usedJson = true;
 			}
-			if (metadata.budgetOverview) {
-				try {
+
+			const rawStartDate = metadata.startDate ? (Array.isArray(metadata.startDate) ? metadata.startDate[0] : metadata.startDate) :
+								interceptedJson.startDate ? (Array.isArray(interceptedJson.startDate) ? interceptedJson.startDate[0] : interceptedJson.startDate) : null;
+			if (rawStartDate) {
+				const dateObj = new Date(rawStartDate);
+				result.OpeningDate = isNaN(dateObj.getTime()) ? rawStartDate : dateObj.toLocaleDateString("en-GB", { day: 'numeric', month: 'long', year: 'numeric' });
+				usedJson = true;
+			}
+
+			const rawDeadlineDate = metadata.deadlineDate ? (Array.isArray(metadata.deadlineDate) ? metadata.deadlineDate[0] : metadata.deadlineDate) :
+									interceptedJson.deadlineDate ? (Array.isArray(interceptedJson.deadlineDate) ? interceptedJson.deadlineDate[0] : interceptedJson.deadlineDate) : null;
+			if (rawDeadlineDate) {
+				const dateObj = new Date(rawDeadlineDate);
+				result.DeadlineDate = isNaN(dateObj.getTime()) ? rawDeadlineDate : dateObj.toLocaleDateString("en-GB", { day: 'numeric', month: 'long', year: 'numeric' });
+				usedJson = true;
+			}
+
+			if (metadata.budgetOverview)
+			{
+				try
+				{
 					const budgetStr = Array.isArray(metadata.budgetOverview) ? metadata.budgetOverview[0] : metadata.budgetOverview;
 					const budgetObj = typeof budgetStr === 'string' ? JSON.parse(budgetStr) : budgetStr;
-					if (budgetObj && budgetObj.budgetTopicActionMap && result.Identifier) {
-						const actionMap = budgetObj.budgetTopicActionMap[result.Identifier];
-						if (actionMap && actionMap.budgetYearMap) {
-							let totalBudget = 0;
-							for (const year in actionMap.budgetYearMap) {
-								totalBudget += parseFloat(actionMap.budgetYearMap[year] || 0);
+					if (budgetObj && budgetObj.budgetTopicActionMap)
+					{
+						let budgetsList = [];
+						let foundBudget = false;
+						for (const internalId in budgetObj.budgetTopicActionMap)
+						{
+							const actionsArr = budgetObj.budgetTopicActionMap[internalId];
+							if (Array.isArray(actionsArr))
+							{
+								for (const act of actionsArr)
+								{
+									if (act.action && act.budgetYearMap)
+									{
+										let actTotal = 0;
+										for (const year in act.budgetYearMap)
+										{
+											actTotal += parseFloat(act.budgetYearMap[year] || 0);
+										}
+										
+										let identifierPrefix = act.action.split(' - ')[0] || act.action;
+										
+										budgetsList.push({
+											identifier: identifierPrefix,
+											totalBudget: actTotal,
+											budgetByYear: act.budgetYearMap,
+											actionDescription: act.action
+										});
+										foundBudget = true;
+									}
+								}
 							}
-							result.Budget = totalBudget;
+						}
+						if (foundBudget)
+						{
+							const uniqueBudgets = [];
+							const seenActions = new Set();
+							for (const b of budgetsList) {
+								if (!seenActions.has(b.actionDescription)) {
+									seenActions.add(b.actionDescription);
+									uniqueBudgets.push(b);
+								}
+							}
+							result.Budgets = uniqueBudgets;
 							usedJson = true;
 						}
 					}
-				} catch (e) {
+				} catch (e)
+				{
 					console.warn("⚠️ Could not parse budgetOverview from JSON");
 				}
 			}
 		}
 
-		if (usedJson && result.Identifier && result.Title) {
+		if (usedJson && result.Identifier && result.Title)
+		{
 			console.log(`✅ Structured JSON data extracted`);
 			return result;
 		}
@@ -1700,6 +1817,37 @@ async function extractProposalData(page, url)
 
 	console.log(`📝 Keyword: "${keyword}"\n`);
 
+	// Clear out old batch files before starting the new run
+	const tempBatchFile = require('path').join(__dirname, "temp_batch.json");
+	const linksFile = require('path').join(__dirname, "all_collected_links.json");
+	try { require('fs').writeFileSync(tempBatchFile, "{}", "utf8"); } catch(e) {}
+	try { require('fs').writeFileSync(linksFile, "[]", "utf8"); } catch(e) {}
+
+	const firebaseEnabled = (process.env.FIREBASE_DATABASE_URL || process.env.FIREBASE_SERVICE_ACCOUNT_PATH || process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+	let currentRunRef = null;
+	let db = null;
+
+	if (firebaseEnabled)
+	{
+		try
+		{
+			const { initFirebase } = require('./firebaseClient');
+			const admin = initFirebase();
+			db = admin.database();
+
+			currentRunRef = db.ref('/eu_proposals').push();
+			await currentRunRef.set({
+				createdAt: new Date().toISOString(),
+				keyword: keyword || "None",
+				sourceFile: 'batch_run',
+			});
+			console.log(`🚀 Immediately initialized new extraction run in Firebase: ${currentRunRef.key}`);
+		} catch (e)
+		{
+			console.warn('❌ Firebase initialization failed:', e.message);
+		}
+	}
+
 	console.log("🌐 Launching browser...");
 	const browser = await puppeteer.launch({
 		headless: process.env.HEADLESS === "true" || process.env.HEADLESS === "new" ? 'new' : false,
@@ -1709,34 +1857,6 @@ async function extractProposalData(page, url)
 	console.log("✅ Browser launched");
 
 	const page = await browser.newPage();
-	const firebaseEnabled = (process.env.FIREBASE_DATABASE_URL || process.env.FIREBASE_SERVICE_ACCOUNT_PATH || process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
-	let currentRunRef = null;
-	let db = null;
-
-	if (firebaseEnabled)
-	{
-		console.log('🧹 Clearing old detailed proposals from Firebase...');
-		try
-		{
-			const { initFirebase } = require('./firebaseClient');
-			const admin = initFirebase();
-			db = admin.database();
-
-			await db.ref('/eu_proposals').remove();
-
-			currentRunRef = db.ref('/eu_proposals').push();
-			await currentRunRef.set({
-				createdAt: new Date().toISOString(),
-				sourceFile: 'batch_run',
-				data: {} 
-			});
-			console.log(`🚀 New extraction run initialized in Firebase: ${currentRunRef.key}`);
-		} catch (e)
-		{
-			console.warn('❌ Firebase initialization failed:', e.message);
-		}
-	}
-
 	let successCount = 0;
 	let failedItems = [];
 	let allExtractionResults = [];
@@ -1749,31 +1869,38 @@ async function extractProposalData(page, url)
 		console.log("=".repeat(70));
 
 		const searchApiResponses = [];
-		page.on('response', async (response) => {
-			if (response.url().includes('api.tech.ec.europa.eu/search-api/prod/rest/search') && response.status() === 200) {
-				try {
+		page.on('response', async (response) =>
+		{
+			if (response.url().includes('api.tech.ec.europa.eu/search-api/prod/rest/search') && response.status() === 200)
+			{
+				try
+				{
 					const json = await response.json();
-					if (json) {
+					if (json)
+					{
 						searchApiResponses.push(json);
 					}
-				} catch (e) {
+				} catch (e)
+				{
 					// ignore
 				}
 			}
 		});
-		
+
 		let URL = "https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportunities/calls-for-proposals?order=DESC&pageNumber=1&pageSize=1000&sortBy=relevance&isExactMatch=true&status=31094502";
-		if (keyword && keyword.trim() !== "") {
+		if (keyword && keyword.trim() !== "")
+		{
 			URL += "&keywords=" + encodeURIComponent(keyword);
 		}
-		
+
 		console.log(`📍 Navigating to direct search URL: ${URL}`);
 		await page.goto(URL, { waitUntil: "networkidle2", timeout: 60000 });
 		console.log("✅ Page loaded");
 
 		// Accept cookies
 		console.log("🍪 Looking for cookie consent button...");
-		await page.evaluate(() => {
+		await page.evaluate(() =>
+		{
 			const els = Array.from(document.querySelectorAll("button, span, a"));
 			const target = els.find(el => (el.textContent || "").toLowerCase().includes("accept all cookies"));
 			if (target) target.click();
@@ -1782,108 +1909,150 @@ async function extractProposalData(page, url)
 
 		// Wait for the results to finish loading
 		console.log("⏳ Waiting for search results to load...");
-		await page.waitForFunction(() => {
-			return document.querySelectorAll('a.eui-u-text-link, a.eui-u-font-l').length > 0 || 
-			       document.querySelector('.eui-paginator') !== null;
+		await page.waitForFunction(() =>
+		{
+			return document.querySelectorAll('a.eui-u-text-link, a.eui-u-font-l').length > 0 ||
+				document.querySelector('.eui-paginator') !== null;
 		}, { timeout: 5000 }).catch(() => console.log("⚠️ Initial load timeout reached, proceeding..."));
 		await new Promise(r => setTimeout(r, 2000));
-		
+
 		// PHASE 2: EXTRACT URLS FROM INTERCEPTED API
 		console.log("\n" + "=".repeat(70));
 		console.log("PHASE 2: EXTRACT URLS FROM INTERCEPTED API");
 		console.log("=".repeat(70));
-		
+
 		let allProposalLinks = [];
-		if (searchApiResponses.length > 0) {
+		if (searchApiResponses.length > 0)
+		{
 			const latest = searchApiResponses[searchApiResponses.length - 1];
 			let items = [];
-			if (latest.results) {
+			if (latest.results)
+			{
 				items = latest.results;
-			} else if (latest.hits && latest.hits.hits) {
+			} else if (latest.hits && latest.hits.hits)
+			{
 				items = latest.hits.hits;
-			} else if (Array.isArray(latest)) {
+			} else if (Array.isArray(latest))
+			{
 				items = latest;
 			}
 
-			for (const item of items) {
-				if (item.url) {
+			for (const item of items)
+			{
+				if (item.url)
+				{
 					allProposalLinks.push(item.url);
-				} else {
+				} else
+				{
 					let identifier = null;
-					if (item.metadata && item.metadata.identifier) {
+					if (item.metadata && item.metadata.identifier)
+					{
 						identifier = Array.isArray(item.metadata.identifier) ? item.metadata.identifier[0] : item.metadata.identifier;
-					} else if (item.identifier) {
+					} else if (item.identifier)
+					{
 						identifier = Array.isArray(item.identifier) ? item.identifier[0] : item.identifier;
 					}
-					if (identifier) {
+					if (identifier)
+					{
 						allProposalLinks.push(`https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportunities/topic-details/${identifier}?keywords=${encodeURIComponent(keyword || '')}`);
 					}
 				}
 			}
 			console.log(`✅ Extracted a total of ${allProposalLinks.length} unique proposal links from API.`);
-		} else {
+		} else
+		{
 			console.warn("⚠️ No API responses were intercepted! Check if the page loaded correctly.");
 		}
-		
+
 		// Save links locally
 		const linksPath = require('path').join(__dirname, "all_collected_links.json");
 		require('fs').writeFileSync(linksPath, JSON.stringify(allProposalLinks, null, 2), "utf8");
 		console.log(`💾 Saved all links locally to all_collected_links.json`);
 
-		// PHASE 3: PROCESS IN BATCHES OF 50
+		// PHASE 3: BATCH PROCESSING & UPLOADING
 		console.log("\n" + "=".repeat(70));
 		console.log("PHASE 3: BATCH PROCESSING & UPLOADING");
 		console.log("=".repeat(70));
 
-		let batchResults = [];
-		const BATCH_SIZE = 50;
-
-		for (let i = 0; i < allProposalLinks.length; i++) {
+		for (let i = 0; i < allProposalLinks.length; i++)
+		{
 			const url = allProposalLinks[i];
 			console.log(`\n⏳ [${i + 1}/${allProposalLinks.length}] Extracting details...`);
 			console.log(`   URL: ${url}`);
-			
+
 			const newTab = await browser.newPage();
-			try {
+			try
+			{
 				const result = await extractProposalData(newTab, url);
-				
-				if (result.error) {
+
+				if (result.error)
+				{
 					failedItems.push({ url, error: result.error });
-				} else {
+				} else
+				{
 					successCount++;
 				}
-				
-				batchResults.push(result);
+
 				allExtractionResults.push(result);
-				
-			} catch(err) {
+
+				// Continuously save locally so user can monitor progress
+				const tempBatchPath = require('path').join(__dirname, "temp_batch.json");
+				require('fs').writeFileSync(tempBatchPath, JSON.stringify({
+					callsData: allExtractionResults,
+					annexBatches: [] // Will be fully populated at the end of the script
+				}, null, 2), "utf8");
+			} catch (err)
+			{
 				console.error(`❌ Failed to process tab: ${err.message}`);
 				failedItems.push({ url, error: err.message });
-			} finally {
+			} finally
+			{
 				await newTab.close();
 			}
 
-			// If we reached batch size or end of list
-			if (batchResults.length === BATCH_SIZE || i === allProposalLinks.length - 1) {
-				console.log(`\n📦 Batch of ${batchResults.length} reached. Saving to temporary file...`);
-				
-				const tempBatchPath = require('path').join(__dirname, "temp_batch.json");
-				require('fs').writeFileSync(tempBatchPath, JSON.stringify(batchResults, null, 2), "utf8");
-				
-				if (currentRunRef) {
-					console.log(`📡 Uploading batch information to Firebase database...`);
-					for(const res of batchResults) {
-						await currentRunRef.child('data').push(res);
-					}
-					console.log(`✅ Upload complete.`);
-				}
-				
-				console.log(`🧹 Clearing temporary text file for the next batch...`);
-				require('fs').writeFileSync(tempBatchPath, JSON.stringify([], null, 2), "utf8");
-				
-				// Clear batch array in memory
-				batchResults = [];
+		}
+
+		if (currentRunRef && allExtractionResults.length > 0) {
+			console.log(`\n📡 Uploading all ${allExtractionResults.length} extracted results to Firebase database...`);
+			for(const res of allExtractionResults) {
+				await currentRunRef.child('data').push(res);
 			}
+			console.log(`✅ Upload complete.`);
+		}
+
+		// EXTRACT UNIQUE ANNEX LINKS AND BATCH THEM
+		const uniqueAnnexLinksSet = new Set();
+		allExtractionResults.forEach(res => {
+			if (res.filesAndAnnexes && res.filesAndAnnexes.annexes) {
+				res.filesAndAnnexes.annexes.forEach(a => {
+					// resolve relative URLs if necessary, but usually they are absolute or root-relative
+					let fullUrl = a.url;
+					if (fullUrl.startsWith('/')) {
+						fullUrl = "https://ec.europa.eu" + fullUrl;
+					}
+					uniqueAnnexLinksSet.add(fullUrl);
+				});
+			}
+		});
+
+		const uniqueAnnexLinks = Array.from(uniqueAnnexLinksSet);
+		const annexBatches = [];
+		const ANNEX_BATCH_SIZE = 10; 
+		for (let i = 0; i < uniqueAnnexLinks.length; i += ANNEX_BATCH_SIZE) {
+			annexBatches.push(uniqueAnnexLinks.slice(i, i + ANNEX_BATCH_SIZE));
+		}
+
+		const tempBatchPathFinal = require('path').join(__dirname, "temp_batch.json");
+		require('fs').writeFileSync(tempBatchPathFinal, JSON.stringify({
+			callsData: allExtractionResults,
+			annexBatches: annexBatches
+		}, null, 2), "utf8");
+		console.log(`\n📎 Saved ${uniqueAnnexLinks.length} unique Annex links in ${annexBatches.length} batches to temp_batch.json`);
+
+		if (currentRunRef && annexBatches.length > 0) {
+			console.log(`📡 Uploading Annex batches to Firebase database...`);
+			await currentRunRef.child('annex_batches').set(annexBatches);
+			console.log(`✅ Annex batches upload complete.`);
 		}
 
 		console.log("\n" + "=".repeat(70));
