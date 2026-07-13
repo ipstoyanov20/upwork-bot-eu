@@ -111,37 +111,99 @@ function ApplyPageContent()
     };
 
     if (runId && rtdb) {
-      // Fetch specifically from the discovery run
-      const runRef = ref(rtdb, `eu_discovery_results/${runId}/data`);
-      onValue(runRef, (snap) => {
+      const db = rtdb;
+      // 1. Try fetching from the detailed run (eu_proposals)
+      const proposalRef = ref(db, `eu_proposals/${runId}/data`);
+      onValue(proposalRef, (snap) => {
         if (snap.exists()) {
-          const list = snap.val() as any[];
-          const found = list.find(o => o.topicCode === callId || (o.href && o.href.includes(callId)));
+          const rawData = snap.val();
+          const list = (Array.isArray(rawData) ? rawData : Object.values(rawData)) as any[];
+          const found = list.find(o => o && (o.Identifier === callId || o.topicCode === callId || (o.url && o.url.includes(callId)) || (o.href && o.href.includes(callId))));
           if (found) {
-            setCallData({
-              title: found.title || callId,
-              topicCode: found.topicCode || callId,
-              programme: found.programme || "Horizon Europe",
-              href: found.href || "",
-              deadline: found.deadlineDate,
-              typeOfAction: found.typeOfAction,
-              budget: found.budget,
-              annexes: [] // We'd need to find these from local-report still if needed
-            });
-            // Still try to get annexes from local-report
-            fetch(`/api/local-report`).then(r => r.json()).then(lr => {
-              const annexes = lr.annexes?.rows ?? [];
-              const myAnnexes = annexes.filter((a: any) => a.topicCode === callId || a.proposalUrl.includes(found.href));
-              setCallData(prev => prev ? ({...prev, annexes: myAnnexes.map((a: any) => ({ title: a.title, url: a.url }))}) : null);
-            }).catch(() => {});
+            const title = found.Title || found.title || callId;
+            const topicCode = found.Identifier || found.topicCode || callId;
+            const programme = found.programme || found.keyInformation?.['Programme'] || "Horizon Europe";
+            const href = found.url || found.href || "";
+            const deadline = found.DeadlineDate || found.deadlineDate || found.keyInformation?.['Deadline_date'] || found.keyInformation?.['Deadline_dates'];
+            const typeOfAction = found.typeOfAction || found.keyInformation?.['Type_of_action'] || found.keyInformation?.['Action_type'];
             
+            let budget = found.budget;
+            if (!budget && found.Budgets && found.Budgets.length > 0) {
+              const b0 = found.Budgets[0];
+              const totalB = b0.totalBudget;
+              budget = `€ ${typeof totalB === 'number' ? totalB.toLocaleString(undefined, { maximumFractionDigits: 0 }) : String(totalB)}`;
+            }
+
+            const annexes: { title: string; url: string }[] = [];
+            const filesAndAnnexes = found.filesAndAnnexes || {};
+            if (Array.isArray(filesAndAnnexes.annexes)) {
+              filesAndAnnexes.annexes.forEach((a: any) => {
+                if (a.title && a.url) annexes.push({ title: a.title, url: a.url });
+              });
+            }
+            if (Array.isArray(filesAndAnnexes.usefulFiles)) {
+              filesAndAnnexes.usefulFiles.forEach((a: any) => {
+                if (a.title && a.url) annexes.push({ title: a.title, url: a.url });
+              });
+            }
+            if (Array.isArray(filesAndAnnexes.documents)) {
+              filesAndAnnexes.documents.forEach((a: any) => {
+                if (a.title && a.url) annexes.push({ title: a.title, url: a.url });
+              });
+            }
+
+            setCallData({
+              title,
+              topicCode,
+              programme,
+              href,
+              deadline,
+              typeOfAction,
+              budget,
+              annexes
+            });
             setLoading(false);
+            return;
+          }
+        }
+
+        // 2. If not found in eu_proposals, try fetching from the discovery run (eu_discovery_results)
+        const discoveryRef = ref(db, `eu_discovery_results/${runId}/data`);
+        onValue(discoveryRef, (snap2) => {
+          if (snap2.exists()) {
+            const list = snap2.val() as any[];
+            const found = list.find(o => o && (o.topicCode === callId || (o.href && o.href.includes(callId))));
+            if (found) {
+              setCallData({
+                title: found.title || callId,
+                topicCode: found.topicCode || callId,
+                programme: found.programme || "Horizon Europe",
+                href: found.href || "",
+                deadline: found.deadlineDate,
+                typeOfAction: found.typeOfAction,
+                budget: found.budget,
+                annexes: []
+              });
+              
+              // Still try to get annexes from local-report
+              fetch(`/api/local-report`)
+                .then(r => r.json())
+                .then(lr => {
+                  const annexes = lr.annexes?.rows ?? [];
+                  const myAnnexes = annexes.filter((a: any) => a.topicCode === callId || a.proposalUrl.includes(found.href));
+                  setCallData(prev => prev ? ({...prev, annexes: myAnnexes.map((a: any) => ({ title: a.title, url: a.url }))}) : null);
+                })
+                .catch(() => {});
+              
+              setLoading(false);
+            } else {
+              fallbackFetch();
+            }
           } else {
             fallbackFetch();
           }
-        } else {
-          fallbackFetch();
-        }
+        }, { onlyOnce: true });
+
       }, { onlyOnce: true });
     } else {
       fallbackFetch();
