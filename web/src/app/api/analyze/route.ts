@@ -55,6 +55,132 @@ function chunkText(text: string, chunkSize = 4000): string[] {
   return chunks.filter(c => c.length > 50); // Ignore tiny chunks
 }
 
+// Helper to escape control characters inside double-quoted JSON strings
+function escapeControlCharsInStrings(jsonStr: string): string {
+  let result = "";
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < jsonStr.length; i++) {
+    const char = jsonStr[i];
+    if (inString) {
+      if (escaped) {
+        result += char;
+        escaped = false;
+      } else if (char === "\\") {
+        result += char;
+        escaped = true;
+      } else if (char === '"') {
+        result += char;
+        inString = false;
+      } else if (char === "\n") {
+        result += "\\n";
+      } else if (char === "\r") {
+        result += "\\r";
+      } else if (char === "\t") {
+        result += "\\t";
+      } else {
+        const code = char.charCodeAt(0);
+        if (code < 32) {
+          result += "\\u" + code.toString(16).padStart(4, "0");
+        } else {
+          result += char;
+        }
+      }
+    } else {
+      if (char === '"') {
+        inString = true;
+      }
+      result += char;
+    }
+  }
+  return result;
+}
+
+// Helper to remove JavaScript-style single line and multiline comments from JSON
+function stripComments(jsonStr: string): string {
+  let result = "";
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < jsonStr.length; i++) {
+    const char = jsonStr[i];
+    if (inString) {
+      result += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+    } else {
+      if (char === '"') {
+        inString = true;
+        result += char;
+      } else if (char === "/" && jsonStr[i + 1] === "/") {
+        while (i < jsonStr.length && jsonStr[i] !== "\n") {
+          i++;
+        }
+        if (i < jsonStr.length) {
+          result += "\n";
+        }
+      } else if (char === "/" && jsonStr[i + 1] === "*") {
+        i += 2;
+        while (i < jsonStr.length && !(jsonStr[i] === "*" && jsonStr[i + 1] === "/")) {
+          i++;
+        }
+        i++;
+      } else {
+        result += char;
+      }
+    }
+  }
+  return result;
+}
+
+// Robust JSON extraction and parsing
+function cleanAndParseJSON(raw: string): any {
+  // Find first '{' and last '}'
+  const start = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  if (start === -1 || end === -1 || end <= start) {
+    throw new Error("Could not find valid JSON object delimiters '{' and '}' in the AI response.");
+  }
+  
+  let jsonStr = raw.substring(start, end + 1);
+
+  // Attempt 1: Direct parse
+  try {
+    return JSON.parse(jsonStr);
+  } catch (err) {
+    console.warn("Direct JSON parsing failed, attempting cleanup...", err);
+  }
+
+  // Attempt 2: Strip comments and try again
+  try {
+    jsonStr = stripComments(jsonStr);
+    return JSON.parse(jsonStr);
+  } catch (err) {
+    console.warn("Parsing after comment stripping failed...", err);
+  }
+
+  // Attempt 3: Escape control characters in string literals
+  try {
+    jsonStr = escapeControlCharsInStrings(jsonStr);
+    return JSON.parse(jsonStr);
+  } catch (err) {
+    console.warn("Parsing after control character escaping failed...", err);
+  }
+
+  // Attempt 4: Clean trailing commas
+  try {
+    jsonStr = jsonStr.replace(/,(\s*[\]}])/g, "$1");
+    return JSON.parse(jsonStr);
+  } catch (err) {
+    console.error("All JSON parsing repair attempts failed. Raw response snippet:", raw.substring(0, 500));
+    throw err;
+  }
+}
+
 // Deterministic Budget Logic
 function generateRuleBasedBudget(totalBudgetStr: string | undefined, participants: any[]) {
   // Parse budget string: e.g. "€ 10.00 million" -> 10000000
@@ -211,15 +337,18 @@ Do not return any other text or markdown.`;
     }
 
     const aiData = await response.json();
+    const rawContent = aiData.choices?.[0]?.message?.content;
+    if (!rawContent) {
+      console.error("AI returned empty/invalid response format:", aiData);
+      throw new Error("AI returned an empty or invalid response format.");
+    }
+
     let aiContent;
     try {
-      let raw = aiData.choices[0].message.content.trim();
-      if (raw.startsWith("```json")) raw = raw.replace(/^```json/, "").replace(/```$/, "").trim();
-      else if (raw.startsWith("```")) raw = raw.replace(/^```/, "").replace(/```$/, "").trim();
-      aiContent = JSON.parse(raw);
-    } catch (e) {
-      console.error("AI JSON Parse Error:", e, aiData.choices[0].message.content);
-      throw new Error(`AI returned malformed JSON: ${aiData.choices[0].message.content.substring(0, 100)}...`);
+      aiContent = cleanAndParseJSON(rawContent);
+    } catch (e: any) {
+      console.error("AI JSON Parse Error:", e, rawContent);
+      throw new Error(`AI returned malformed JSON: ${e.message}. Snippet: ${rawContent.substring(0, 150)}...`);
     }
 
     const cleanCitations = (obj: any): any => {
